@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "RiyadusSalihinApp",
-    "slug": "RiyadusSalihinApp",
+    "slug": "riyadusalihin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -35,6 +35,13 @@
       ],
       "expo-asset",
       "expo-sqlite"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e710b932-f7a1-4fdc-b3f4-d879b4a6222a"
+      }
+    },
+    "owner": "amirhumdevs-team"
   }
 }
