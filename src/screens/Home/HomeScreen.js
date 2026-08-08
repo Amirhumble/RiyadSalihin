@@ -107,6 +107,24 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.secondaryCardChevron}>›</Text>
         </TouchableOpacity>
+
+        {/* ── PDF book shortcut ─────────────────────────────────── */}
+        <TouchableOpacity
+          style={[styles.secondaryCard, styles.pdfCard]}
+          onPress={() => router.push('/pdf')}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Read the book as PDF"
+        >
+          <Text style={styles.secondaryCardIcon}>📄</Text>
+          <View style={styles.secondaryCardText}>
+            <Text style={styles.secondaryCardTitle}>Read as PDF</Text>
+            <Text style={styles.secondaryCardSub}>
+              Riyad as-Salihin full book
+            </Text>
+          </View>
+          <Text style={styles.secondaryCardChevron}>›</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -297,5 +315,10 @@ const styles = StyleSheet.create({
   secondaryCardChevron: {
     fontSize: 22,
     color: colors.textMuted,
+  },
+
+  // PDF card variation
+  pdfCard: {
+    marginTop: spacing.sm,
   },
 });
