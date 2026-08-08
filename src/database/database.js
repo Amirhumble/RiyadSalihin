@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
+import { runDevSeed } from './devSeed';
 import { up as migration001 } from './migrations/001_initial';
 import { SCHEMA_VERSION } from './schema';
 
