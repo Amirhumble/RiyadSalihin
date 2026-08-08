@@ -42,7 +42,9 @@ function AppShell() {
   // DB is ready — mount AudioProvider and the navigation stack together.
   return (
     <AudioProvider>
-      <Stack screenOptions={{ headerShown: false }} />
+      <ReadingProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </ReadingProvider>
     </AudioProvider>
   );
 }
