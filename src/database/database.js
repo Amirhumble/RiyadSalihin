@@ -1,0 +1,108 @@
+import * as SQLite from 'expo-sqlite';
+
+import { up as migration001 } from './migrations/001_initial';
+import { SCHEMA_VERSION } from './schema';
+
+const DB_NAME = 'riyadus_salihin.db';
+
+/**
+ * Ordered list of migrations.
+ * Add future migrations here: { version, up }
+ */
+const MIGRATIONS = [
+  { version: 1, up: migration001 },
+];
+
+/** Singleton database handle — shared across the entire app. */
+let _db = null;
+
+/**
+ * Returns the open database instance.
+ * Throws if initDatabase() has not been called yet.
+ */
+export function getDatabase() {
+  if (!_db) {
+    throw new Error(
+      '[Database] Database is not initialized. ' +
+      'Call initDatabase() before using repositories.'
+    );
+  }
+  return _db;
+}
+
+/**
+ * Opens the SQLite database, enables foreign keys, and runs any
+ * pending migrations.  Safe to call on every app start — already-run
+ * migrations are skipped via the user_version PRAGMA.
+ *
+ * @returns {Promise<void>}
+ */
+export async function initDatabase() {
+  if (_db) {
+    // Already initialized — nothing to do.
+    return;
+  }
+
+  _db = await SQLite.openDatabaseAsync(DB_NAME);
+
+  // WAL mode improves concurrent read performance.
+  await _db.execAsync('PRAGMA journal_mode = WAL;');
+
+  // Foreign-key enforcement is off by default in SQLite.
+  await _db.execAsync('PRAGMA foreign_keys = ON;');
+
+  await runMigrations(_db);
+}
+
+/**
+ * Closes and resets the database handle.
+ * Primarily useful in tests.
+ */
+export async function closeDatabase() {
+  if (_db) {
+    await _db.closeAsync();
+    _db = null;
+  }
+}
+
+// ─── private ────────────────────────────────────────────────────────────────
+
+/**
+ * Runs every migration whose version number exceeds the current
+ * user_version PRAGMA value.
+ *
+ * @param {import('expo-sqlite').SQLiteDatabase} db
+ */
+async function runMigrations(db) {
+  // user_version is an integer PRAGMA SQLite reserves for app use.
+  const result = await db.getFirstAsync('PRAGMA user_version;');
+  const currentVersion = result?.user_version ?? 0;
+
+  if (currentVersion >= SCHEMA_VERSION) {
+    console.log(
+      `[Database] Schema is up to date (version ${currentVersion}).`
+    );
+    return;
+  }
+
+  console.log(
+    `[Database] Running migrations ${currentVersion} → ${SCHEMA_VERSION} …`
+  );
+
+  // Run inside a single transaction so a partial failure leaves the
+  // database in a consistent state.
+  await db.withTransactionAsync(async () => {
+    for (const migration of MIGRATIONS) {
+      if (migration.version > currentVersion) {
+        console.log(`[Database] Applying migration ${migration.version} …`);
+        await migration.up(db);
+      }
+    }
+
+    // Update the stored version after all migrations succeed.
+    // PRAGMA cannot be parameterised, but version is a trusted integer.
+    await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  });
+
+  console.log(`[Database] Migrations complete. Schema version: ${SCHEMA_VERSION}.`);
+}
