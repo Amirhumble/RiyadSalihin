@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
     FlatList,
+    RefreshControl,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -14,6 +15,7 @@ import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
+import typography from '@/constants/typography';
 import { useAppContext } from '@/context/AppContext';
 import {
     getBookmarks,
@@ -26,35 +28,48 @@ export default function BookmarksScreen() {
 
   const [bookmarks, setBookmarks] = useState(null);
   const [loading, setLoading]     = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError]         = useState(null);
 
-  const loadBookmarks = useCallback(async () => {
-    if (!isDbReady) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getBookmarks();
-      setBookmarks(data);
-    } catch (err) {
-      console.error('[BookmarksScreen] load error:', err);
-      setError(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [isDbReady]);
+  const loadBookmarks = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!isDbReady) return;
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const data = await getBookmarks();
+        setBookmarks(data);
+      } catch (err) {
+        console.error('[BookmarksScreen] load error:', err);
+        setError(err);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [isDbReady]
+  );
 
-  // Reload every time the tab comes into focus so bookmark changes made
-  // on HadithDetailScreen are reflected immediately.
+  // Reload every time this tab comes into focus — picks up bookmark changes
+  // made on HadithDetailScreen or ChapterHadithsScreen.
   useFocusEffect(
     useCallback(() => {
       loadBookmarks();
     }, [loadBookmarks])
   );
 
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadBookmarks({ silent: true });
+  }, [loadBookmarks]);
+
   const handleRemove = useCallback(async (hadithId) => {
     try {
       await removeBookmark(hadithId);
-      setBookmarks((prev) => prev.filter((b) => b.id !== hadithId));
+      // Optimistic update — remove from local state immediately.
+      setBookmarks((prev) =>
+        prev ? prev.filter((b) => b.id !== hadithId) : prev
+      );
     } catch (err) {
       console.error('[BookmarksScreen] remove error:', err);
     }
@@ -65,10 +80,13 @@ export default function BookmarksScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* ── Header ─────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Bookmarks</Text>
         {bookmarks?.length > 0 && (
-          <Text style={styles.headerCount}>{bookmarks.length}</Text>
+          <View style={styles.countBadge}>
+            <Text style={styles.countBadgeText}>{bookmarks.length}</Text>
+          </View>
         )}
       </View>
 
@@ -93,10 +111,20 @@ export default function BookmarksScreen() {
           bookmarks?.length === 0 ? styles.emptyContainer : styles.list
         }
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       />
     </SafeAreaView>
   );
 }
+
+// ─── BookmarkRow ─────────────────────────────────────────────────────────────
 
 function BookmarkRow({ item, onPress, onRemove }) {
   return (
@@ -104,27 +132,45 @@ function BookmarkRow({ item, onPress, onRemove }) {
       style={styles.row}
       onPress={onPress}
       activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Hadith ${item.hadith_number}`}
+      accessibilityHint="Opens full hadith"
     >
       <View style={styles.rowContent}>
-        <Text style={styles.hadithNumber}>Hadith {item.hadith_number}</Text>
-        <Text style={styles.arabicText} numberOfLines={2}>
+        {/* Label row */}
+        <Text style={styles.hadithLabel}>Hadith {item.hadith_number}</Text>
+
+        {/* Arabic preview */}
+        <Text
+          style={styles.arabicText}
+          numberOfLines={2}
+          accessibilityLanguage="ar"
+        >
           {item.arabic_text}
         </Text>
+
+        {/* English preview */}
         <Text style={styles.englishText} numberOfLines={2}>
           {item.english_text}
         </Text>
       </View>
+
+      {/* Remove button */}
       <TouchableOpacity
         style={styles.removeButton}
         onPress={onRemove}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         activeOpacity={0.7}
+        accessibilityLabel="Remove bookmark"
+        accessibilityRole="button"
       >
         <Text style={styles.removeIcon}>✕</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safe: {
@@ -137,23 +183,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
     color: colors.text,
     flex: 1,
   },
-  headerCount: {
-    fontSize: 13,
-    color: colors.textMuted,
-    backgroundColor: colors.backgroundSecondary,
+  countBadge: {
+    backgroundColor: colors.primaryLight,
     borderRadius: 10,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
+  },
+  countBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
   },
 
   // List
@@ -164,7 +214,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   separator: {
-    height: 1,
+    height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
     marginLeft: spacing.lg,
   },
@@ -181,32 +231,37 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: spacing.md,
   },
-  hadithNumber: {
+
+  hadithLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 4,
+    marginBottom: 5,
   },
   arabicText: {
-    fontSize: 15,
-    lineHeight: 26,
+    fontSize: 16,
+    lineHeight: 28,
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
+    fontFamily: typography.fontFamily,
     marginBottom: 4,
   },
   englishText: {
     fontSize: 13,
     lineHeight: 20,
     color: colors.textSecondary,
+    fontFamily: typography.fontFamily,
   },
+
   removeButton: {
     padding: spacing.xs,
+    alignSelf: 'flex-start',
   },
   removeIcon: {
-    fontSize: 15,
+    fontSize: 16,
     color: colors.textMuted,
   },
 });

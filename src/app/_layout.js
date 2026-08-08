@@ -1,21 +1,22 @@
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, DB_STATUS, useAppContext } from '@/context/AppContext';
+import { AudioProvider } from '@/context/AudioContext';
 
 SplashScreen.preventAutoHideAsync();
 
 /**
- * Inner component — can safely call useAppContext because it is rendered
- * inside AppProvider.
+ * AppShell sits inside AppProvider so it can read DB status.
+ * AudioProvider is nested inside here — it will only mount once the DB
+ * is ready, which is the correct moment to configure the audio session.
  */
 function AppShell() {
   const { dbStatus, dbError, retryInit } = useAppContext();
 
-  // Hide the splash screen once the database is ready (or failed).
   useEffect(() => {
     if (dbStatus === DB_STATUS.READY || dbStatus === DB_STATUS.ERROR) {
       SplashScreen.hideAsync();
@@ -23,8 +24,7 @@ function AppShell() {
   }, [dbStatus]);
 
   if (dbStatus === DB_STATUS.IDLE || dbStatus === DB_STATUS.LOADING) {
-    // Splash screen is still visible — render nothing behind it.
-    return null;
+    return null; // splash screen still visible
   }
 
   if (dbStatus === DB_STATUS.ERROR) {
@@ -32,14 +32,19 @@ function AppShell() {
       <View style={styles.errorContainer}>
         <Text style={styles.errorTitle}>Failed to open database</Text>
         <Text style={styles.errorMessage}>{dbError?.message}</Text>
-        <Text style={styles.retryButton} onPress={retryInit}>
-          Tap to retry
-        </Text>
+        <TouchableOpacity onPress={retryInit} style={styles.retryBtn}>
+          <Text style={styles.retryText}>Tap to retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  // DB is ready — mount AudioProvider and the navigation stack together.
+  return (
+    <AudioProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </AudioProvider>
+  );
 }
 
 export default function RootLayout() {
@@ -73,9 +78,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
   },
-  retryButton: {
+  retryBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    backgroundColor: '#1B6CA8',
+    borderRadius: 8,
+  },
+  retryText: {
     fontSize: 16,
-    color: '#1B6CA8',
+    color: '#fff',
     fontWeight: '600',
   },
 });

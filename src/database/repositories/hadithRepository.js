@@ -103,3 +103,30 @@ export async function getAdjacentHadiths(hadithId) {
 
   return { prev: prev ?? null, next: next ?? null };
 }
+
+/**
+ * Full-text search across arabic_text, english_text, and hadith_number.
+ * Uses LIKE with parameterised values — user input is never concatenated
+ * into the SQL string.
+ *
+ * @param {string} query  - Raw search string from the user.
+ * @returns {Promise<Array>}
+ */
+export async function searchHadiths(query) {
+  if (!query || query.trim() === '') return [];
+
+  const db = getDatabase();
+  const term = `%${query.trim()}%`;
+
+  return db.getAllAsync(
+    `SELECT h.*, c.english_title AS chapter_english_title, c.arabic_title AS chapter_arabic_title
+       FROM hadiths h
+       LEFT JOIN chapters c ON c.id = h.chapter_id
+      WHERE h.arabic_text    LIKE ?
+         OR h.english_text   LIKE ?
+         OR h.hadith_number  LIKE ?
+      ORDER BY h.ordering ASC, h.id ASC
+      LIMIT 100;`,
+    [term, term, term]
+  );
+}
