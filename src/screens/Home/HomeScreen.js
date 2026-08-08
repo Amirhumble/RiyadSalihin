@@ -18,7 +18,7 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const { data: chapterCount } = useDbQuery(() => getChapterCount(), []);
-  const { data: hadithCount  } = useDbQuery(() => getHadithCount(),  []);
+  const { data: hadithCount }  = useDbQuery(() => getHadithCount(), []);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -26,8 +26,8 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <View style={styles.header}>
+        {/* ── Title ──────────────────────────────────────────── */}
+        <View style={styles.titleBlock}>
           <Text style={styles.arabicTitle}>رياض الصالحين</Text>
           <Text style={styles.latinTitle}>Riyad as-Salihin</Text>
           <Text style={styles.description}>
@@ -36,28 +36,39 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* ── Stats ──────────────────────────────────────────────── */}
+        {/* ── Search entry ────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.searchBar}
+          onPress={() => router.push('/search')}
+          activeOpacity={0.8}
+          accessibilityRole="search"
+          accessibilityLabel="Search hadiths"
+          accessibilityHint="Opens the search screen"
+        >
+          <Text style={styles.searchIcon}>🔍</Text>
+          <Text style={styles.searchPlaceholder}>Search hadiths…</Text>
+        </TouchableOpacity>
+
+        {/* ── Stats ───────────────────────────────────────────── */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>
-              {chapterCount ?? '—'}
-            </Text>
+            <Text style={styles.statNumber}>{chapterCount ?? '—'}</Text>
             <Text style={styles.statLabel}>Chapters</Text>
           </View>
-          <View style={styles.statDivider} />
+          <View style={styles.statSplit} />
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>
-              {hadithCount ?? '—'}
-            </Text>
+            <Text style={styles.statNumber}>{hadithCount ?? '—'}</Text>
             <Text style={styles.statLabel}>Hadiths</Text>
           </View>
         </View>
 
-        {/* ── Browse card ────────────────────────────────────────── */}
+        {/* ── Browse chapters card ─────────────────────────────── */}
         <TouchableOpacity
           style={styles.browseCard}
           onPress={() => router.push('/chapters')}
           activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Browse chapters"
         >
           <View style={styles.browseCardInner}>
             <Text style={styles.browseIcon}>📖</Text>
@@ -86,11 +97,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
 
-  // Header
-  header: {
+  // Title block
+  titleBlock: {
     alignItems: 'center',
     paddingVertical: spacing.xl,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
     marginBottom: spacing.lg,
   },
@@ -118,6 +129,28 @@ const styles = StyleSheet.create({
     maxWidth: 300,
   },
 
+  // Search bar (tap target — no editing here)
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  searchIcon: {
+    fontSize: 16,
+  },
+  searchPlaceholder: {
+    fontSize: 15,
+    color: colors.textMuted,
+    flex: 1,
+  },
+
   // Stats
   statsRow: {
     flexDirection: 'row',
@@ -125,14 +158,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: spacing.lg,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   statCard: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.md,
   },
-  statDivider: {
-    width: 1,
+  statSplit: {
+    width: StyleSheet.hairlineWidth,
     backgroundColor: colors.border,
     marginVertical: spacing.sm,
   },
@@ -157,10 +192,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
+    gap: spacing.md,
   },
   browseIcon: {
     fontSize: 28,
-    marginRight: spacing.md,
   },
   browseTextGroup: {
     flex: 1,
@@ -178,6 +213,5 @@ const styles = StyleSheet.create({
   browseChevron: {
     fontSize: 24,
     color: 'rgba(255,255,255,0.7)',
-    marginLeft: spacing.sm,
   },
 });
