@@ -65,3 +65,41 @@ export async function getAudiosForHadith(hadithId) {
     [hadithId]
   );
 }
+
+/**
+ * Returns the previous and next hadith within the same chapter
+ * relative to the given hadith, based on ordering + id.
+ * Either value may be null if there is no adjacent record.
+ *
+ * @param {number} hadithId
+ * @returns {Promise<{prev: Object|null, next: Object|null}>}
+ */
+export async function getAdjacentHadiths(hadithId) {
+  const db = getDatabase();
+
+  const current = await db.getFirstAsync(
+    'SELECT id, chapter_id, ordering FROM hadiths WHERE id = ?;',
+    [hadithId]
+  );
+  if (!current) return { prev: null, next: null };
+
+  const prev = await db.getFirstAsync(
+    `SELECT * FROM hadiths
+      WHERE chapter_id = ?
+        AND (ordering < ? OR (ordering = ? AND id < ?))
+      ORDER BY ordering DESC, id DESC
+      LIMIT 1;`,
+    [current.chapter_id, current.ordering, current.ordering, current.id]
+  );
+
+  const next = await db.getFirstAsync(
+    `SELECT * FROM hadiths
+      WHERE chapter_id = ?
+        AND (ordering > ? OR (ordering = ? AND id > ?))
+      ORDER BY ordering ASC, id ASC
+      LIMIT 1;`,
+    [current.chapter_id, current.ordering, current.ordering, current.id]
+  );
+
+  return { prev: prev ?? null, next: next ?? null };
+}

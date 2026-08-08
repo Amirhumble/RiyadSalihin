@@ -52,6 +52,12 @@ export async function initDatabase() {
   await _db.execAsync('PRAGMA foreign_keys = ON;');
 
   await runMigrations(_db);
+
+  // DEV ONLY: seed empty database with sample data for development.
+  // Remove this call (or the devSeed.js import) before shipping.
+  if (__DEV__) {
+    await runDevSeed();
+  }
 }
 
 /**
