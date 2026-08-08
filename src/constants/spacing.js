@@ -1,4 +1,3 @@
-// Placeholder — define your spacing scale here
 const spacing = {
   xs: 4,
   sm: 8,
