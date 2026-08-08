@@ -188,6 +188,24 @@ export default function AudioPlayer({ audioRecord, savedPositionMs = 0 }) {
       {isThisAudio && didJustFinish && (
         <Text style={styles.finishedText}>Playback complete</Text>
       )}
+
+      {/* ── DEV-only debug info ────────────────────────────────── */}
+      {__DEV__ && (
+        <View style={styles.devInfo}>
+          <Text style={styles.devInfoText}>
+            {[
+              `file: ${audioRecord?.filename ?? '—'}`,
+              isThisAudio
+                ? (effectivePlaying ? '▶ playing' : effectiveBuffering ? '⟳ buffering' : '⏸ paused')
+                : '○ inactive',
+              isThisAudio ? `${formatTime(effectiveTime)} / ${effectiveDuration > 0 ? formatTime(effectiveDuration) : '--:--'}` : '',
+              isThisAudio && audioError ? `err: ${audioError.message}` : '',
+            ]
+              .filter(Boolean)
+              .join('  ·  ')}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -274,5 +292,18 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     marginTop: spacing.xs,
+  },
+
+  // DEV-only debug row
+  devInfo: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+  },
+  devInfoText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontFamily: 'monospace',
   },
 });

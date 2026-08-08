@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, DB_STATUS, useAppContext } from '@/context/AppContext';
 import { AudioProvider } from '@/context/AudioContext';
+import { ReadingProvider } from '@/context/ReadingContext';
 
 SplashScreen.preventAutoHideAsync();
 
