@@ -12,9 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AudioPlayer from '@/components/audio/AudioPlayer';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
+import ReadingSettingsPanel from '@/components/ui/ReadingSettingsPanel';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import typography from '@/constants/typography';
+import { useReading } from '@/context/ReadingContext';
 import {
     addBookmark,
     isBookmarked,
@@ -33,6 +35,16 @@ export default function HadithDetailScreen() {
   const { hadithId } = useLocalSearchParams();
   const id = Number(hadithId);
 
+  // Reading preferences
+  const {
+    arabicFontSize,
+    arabicLineHeight,
+    englishFontSize,
+    englishLineHeight,
+  } = useReading();
+
+  const [settingsVisible, setSettingsVisible] = useState(false);
+
   const {
     data: hadith,
     loading: hadithLoading,
@@ -50,12 +62,10 @@ export default function HadithDetailScreen() {
     [hadith?.chapter_id]
   );
 
-  // Load audio records linked to this hadith.
   const { data: audioRecords } = useDbQuery(
     () => getAudiosForHadith(id),
     [id]
   );
-  // Use the first linked audio track (if any).
   const primaryAudio = audioRecords?.[0] ?? null;
 
   const [bookmarked, setBookmarked] = useState(false);
@@ -92,8 +102,9 @@ export default function HadithDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* ── Compact header ─────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────── */}
       <View style={styles.header}>
+        {/* Back */}
         <TouchableOpacity
           style={styles.headerBtn}
           onPress={() => router.back()}
@@ -104,21 +115,34 @@ export default function HadithDetailScreen() {
           <Text style={styles.backText}>‹ Back</Text>
         </TouchableOpacity>
 
+        {/* Title */}
         <Text style={styles.headerTitle} numberOfLines={1}>
           Hadith {hadith.hadith_number}
         </Text>
 
-        <TouchableOpacity
-          style={styles.headerBtn}
-          onPress={toggleBookmark}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
-          accessibilityRole="button"
-        >
-          <Text style={styles.headerBookmarkIcon}>
-            {bookmarked ? '🔖' : '🏷️'}
-          </Text>
-        </TouchableOpacity>
+        {/* Right side: settings + bookmark */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => setSettingsVisible(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Reading settings"
+            accessibilityRole="button"
+          >
+            <Text style={styles.headerIconText}>Aa</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={toggleBookmark}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
+            accessibilityRole="button"
+          >
+            <Text style={styles.headerIconText}>
+              {bookmarked ? '🔖' : '🏷️'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -132,7 +156,7 @@ export default function HadithDetailScreen() {
             onPress={() => router.push(`/chapter/${chapter.id}`)}
             activeOpacity={0.7}
             accessibilityRole="link"
-            accessibilityLabel={`Chapter: ${chapter.english_title}`}
+            accessibilityLabel={`Go to chapter: ${chapter.english_title}`}
           >
             <Text style={styles.breadcrumbText} numberOfLines={1}>
               {chapter.arabic_title}  ·  {chapter.english_title}
@@ -148,10 +172,13 @@ export default function HadithDetailScreen() {
           </View>
         </View>
 
-        {/* ── Arabic text (visual priority) ───────────────────── */}
+        {/* ── Arabic text ──────────────────────────────────────── */}
         <View style={styles.arabicBlock}>
           <Text
-            style={styles.arabicText}
+            style={[
+              styles.arabicText,
+              { fontSize: arabicFontSize, lineHeight: arabicLineHeight },
+            ]}
             accessibilityLanguage="ar"
             selectable
           >
@@ -166,12 +193,18 @@ export default function HadithDetailScreen() {
           <View style={styles.sectionLine} />
         </View>
 
-        {/* ── English translation ─────────────────────────────── */}
-        <Text style={styles.englishText} selectable>
+        {/* ── English translation ──────────────────────────────── */}
+        <Text
+          style={[
+            styles.englishText,
+            { fontSize: englishFontSize, lineHeight: englishLineHeight },
+          ]}
+          selectable
+        >
           {hadith.english_text}
         </Text>
 
-        {/* ── Audio player ────────────────────────────────────── */}
+        {/* ── Audio player ─────────────────────────────────────── */}
         {primaryAudio ? (
           <View style={styles.audioSection}>
             <AudioPlayer
@@ -187,7 +220,7 @@ export default function HadithDetailScreen() {
           </View>
         )}
 
-        {/* ── Bookmark action ─────────────────────────────────── */}
+        {/* ── Bookmark action ──────────────────────────────────── */}
         <TouchableOpacity
           style={[
             styles.bookmarkAction,
@@ -216,25 +249,29 @@ export default function HadithDetailScreen() {
           <NavButton
             label="‹ Previous"
             enabled={hasPrev}
-            onPress={() =>
-              hasPrev && router.replace(`/hadith/${adjacent.prev.id}`)
-            }
+            onPress={() => hasPrev && router.replace(`/hadith/${adjacent.prev.id}`)}
             accessibilityLabel="Previous hadith"
           />
           <NavButton
             label="Next ›"
             enabled={hasNext}
-            onPress={() =>
-              hasNext && router.replace(`/hadith/${adjacent.next.id}`)
-            }
+            onPress={() => hasNext && router.replace(`/hadith/${adjacent.next.id}`)}
             accessibilityLabel="Next hadith"
             align="right"
           />
         </View>
       </ScrollView>
+
+      {/* ── Reading settings panel ─────────────────────────────── */}
+      <ReadingSettingsPanel
+        visible={settingsVisible}
+        onClose={() => setSettingsVisible(false)}
+      />
     </SafeAreaView>
   );
 }
+
+// ─── NavButton ────────────────────────────────────────────────────────────────
 
 function NavButton({ label, enabled, onPress, accessibilityLabel, align = 'left' }) {
   return (
@@ -264,6 +301,8 @@ function NavButton({ label, enabled, onPress, accessibilityLabel, align = 'left'
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
@@ -281,8 +320,14 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
     backgroundColor: colors.background,
   },
-  headerBtn: { minWidth: 60 },
-  backText: { fontSize: 16, color: colors.primary, fontWeight: '500' },
+  headerBtn: {
+    minWidth: 60,
+  },
+  backText: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '500',
+  },
   headerTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -290,9 +335,28 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
   },
-  headerBookmarkIcon: { fontSize: 20, textAlign: 'right' },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minWidth: 60,
+    justifyContent: 'flex-end',
+  },
+  headerIconBtn: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconText: {
+    fontSize: 15,
+    color: colors.primary,
+    fontWeight: '600',
+  },
 
-  // Scroll
+  // Scroll content
   scroll: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -306,11 +370,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     gap: 4,
   },
-  breadcrumbText: { fontSize: 12, color: colors.primary, flex: 1 },
-  breadcrumbChevron: { fontSize: 14, color: colors.primary },
+  breadcrumbText: {
+    fontSize: 12,
+    color: colors.primary,
+    flex: 1,
+  },
+  breadcrumbChevron: {
+    fontSize: 14,
+    color: colors.primary,
+  },
 
   // Badge
-  badgeRow: { marginBottom: spacing.md },
+  badgeRow: {
+    marginBottom: spacing.md,
+  },
   badge: {
     alignSelf: 'flex-start',
     backgroundColor: colors.primaryLight,
@@ -325,7 +398,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Arabic
+  // Arabic block — font size / line height driven by ReadingContext
   arabicBlock: {
     backgroundColor: colors.backgroundSecondary,
     borderRadius: 14,
@@ -336,8 +409,6 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
   },
   arabicText: {
-    fontSize: 24,
-    lineHeight: 44,
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -364,10 +435,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
 
-  // English
+  // English text — font size / line height driven by ReadingContext
   englishText: {
-    fontSize: 16,
-    lineHeight: 28,
     color: colors.textSecondary,
     textAlign: 'left',
     marginBottom: spacing.lg,
@@ -392,7 +461,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Bookmark
+  // Bookmark action
   bookmarkAction: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -417,7 +486,7 @@ const styles = StyleSheet.create({
   },
   bookmarkActionTextActive: { color: colors.primary },
 
-  // Nav
+  // Nav row
   navRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -432,10 +501,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.background,
     alignItems: 'flex-start',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   navButtonRight: { alignItems: 'flex-end' },
   navButtonDisabled: { opacity: 0.25 },
-  navButtonText: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  navButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
   navButtonTextRight: { textAlign: 'right' },
   navButtonTextDisabled: { color: colors.textMuted },
 });
