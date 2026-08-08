@@ -4,12 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 
-export default function SettingsScreen() {
+export default function BookmarksScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        <Text style={styles.label}>Settings</Text>
-        <Text style={styles.hint}>App preferences will be configured here.</Text>
+        <Text style={styles.label}>Bookmarks</Text>
+        <Text style={styles.hint}>Your saved hadiths will appear here.</Text>
       </View>
     </SafeAreaView>
   );
