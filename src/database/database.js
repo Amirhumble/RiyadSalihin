@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 
 import { runDevSeed } from './devSeed';
 import { up as migration001 } from './migrations/001_initial';
+import { up as migration002 } from './migrations/002_add_pdf_page';
 import { SCHEMA_VERSION } from './schema';
 
 const DB_NAME = 'riyadus_salihin.db';
@@ -12,6 +13,7 @@ const DB_NAME = 'riyadus_salihin.db';
  */
 const MIGRATIONS = [
   { version: 1, up: migration001 },
+  { version: 2, up: migration002 },
 ];
 
 /** Singleton database handle — shared across the entire app. */

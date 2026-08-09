@@ -1,6 +1,3 @@
-import { Redirect } from 'expo-router';
+import IntroScreen from '@/screens/IntroScreen';
 
-// Redirect the root route to the (tabs) group
-export default function Index() {
-  return <Redirect href="/(tabs)/home" />;
-}
+export default IntroScreen;

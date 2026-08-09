@@ -283,9 +283,9 @@ export async function importAudioContent({ audios, audioLinks }) {
         : null;
 
       const result = await db.runAsync(
-        `INSERT INTO audios (title, filename, chapter_id, ordering)
-         VALUES (?, ?, ?, ?);`,
-        [a.title.trim(), fname, chapterId ?? null, a.ordering]
+        `INSERT INTO audios (title, filename, chapter_id, ordering, pdf_page)
+         VALUES (?, ?, ?, ?, ?);`,
+        [a.title.trim(), fname, chapterId ?? null, a.ordering, a.pdf_page ?? null]
       );
       audiosInserted += 1;
       filenameToAudioId[fname] = result.lastInsertRowId;

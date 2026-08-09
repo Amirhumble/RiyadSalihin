@@ -1,6 +1,24 @@
 import { getDatabase } from '../database';
 
 /**
+ * Returns all audio tracks ordered for display, joined with chapter info.
+ * Used by the AudioListScreen to show chapter/hadith context per track.
+ * @returns {Promise<Array>}
+ */
+export async function getAllAudiosWithChapterInfo() {
+  const db = getDatabase();
+  return db.getAllAsync(
+    `SELECT a.*,
+            c.arabic_title  AS chapter_arabic_title,
+            c.english_title AS chapter_english_title,
+            c.chapter_number AS chapter_number_val
+       FROM audios a
+       LEFT JOIN chapters c ON c.id = a.chapter_id
+      ORDER BY a.ordering ASC, a.id ASC;`
+  );
+}
+
+/**
  * Returns all audio tracks ordered for display.
  * @returns {Promise<Array>}
  */
