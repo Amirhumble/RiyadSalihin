@@ -15,102 +15,69 @@ import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
+import typography from '@/constants/typography';
 import { searchHadiths } from '@/database/repositories/hadithRepository';
 
 const MIN_QUERY_LENGTH = 2;
 
 export default function SearchScreen() {
-  const router = useRouter();
+  const router   = useRouter();
   const inputRef = useRef(null);
 
-  const [query, setQuery]       = useState('');
-  const [results, setResults]   = useState(null); // null = no search yet
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState(null);
+  const [query,   setQuery]   = useState('');
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
 
   const runSearch = useCallback(async (text) => {
     const trimmed = text.trim();
-    if (trimmed.length < MIN_QUERY_LENGTH) {
-      setResults(null);
-      setError(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
+    if (trimmed.length < MIN_QUERY_LENGTH) { setResults(null); setError(null); return; }
+    setLoading(true); setError(null);
     try {
-      const data = await searchHadiths(trimmed);
-      setResults(data);
+      setResults(await searchHadiths(trimmed));
     } catch (err) {
-      console.error('[SearchScreen] search error:', err);
+      console.error('[SearchScreen]', err);
       setError(err);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const handleChangeText = useCallback((text) => {
-    setQuery(text);
-    runSearch(text);
-  }, [runSearch]);
+  const handleChange = useCallback((text) => { setQuery(text); runSearch(text); }, [runSearch]);
 
   const handleClear = useCallback(() => {
-    setQuery('');
-    setResults(null);
-    setError(null);
+    setQuery(''); setResults(null); setError(null);
     inputRef.current?.focus();
   }, []);
 
   const renderBody = () => {
     if (loading) return <ScreenLoader />;
-
-    if (error) {
-      return (
-        <ScreenError
-          message={error.message}
-          onRetry={() => runSearch(query)}
-        />
-      );
-    }
-
-    // No search performed yet
-    if (results === null) {
-      return (
-        <EmptyState
-          icon="🔍"
-          title="Search hadiths"
-          subtitle={`Type ${MIN_QUERY_LENGTH} or more characters to search Arabic text, English translation, or hadith number.`}
-        />
-      );
-    }
-
-    if (results.length === 0) {
-      return (
-        <EmptyState
-          icon="📭"
-          title="No results found"
-          subtitle={`No hadiths matched "${query}". Try a different word or phrase.`}
-        />
-      );
-    }
-
+    if (error)   return <ScreenError onRetry={() => runSearch(query)} />;
+    if (results === null) return (
+      <EmptyState
+        title="Search the book"
+        subtitle="Type Arabic or English text to find hadiths."
+      />
+    );
+    if (results.length === 0) return (
+      <EmptyState
+        title="Nothing found"
+        subtitle={`No hadiths matched "${query}". Try a different word.`}
+      />
+    );
     return (
       <FlatList
         data={results}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
-          <SearchResultRow
-            item={item}
-            query={query}
-            onPress={() => router.push(`/hadith/${item.id}`)}
-          />
+          <ResultRow item={item} onPress={() => router.push(`/hadith/${item.id}`)} />
         )}
         contentContainerStyle={styles.list}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ItemSeparatorComponent={() => <View style={styles.sep} />}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
         ListHeaderComponent={
-          <Text style={styles.resultsCount}>
+          <Text style={styles.count}>
             {results.length} result{results.length !== 1 ? 's' : ''}
           </Text>
         }
@@ -119,33 +86,31 @@ export default function SearchScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* Header with back + search bar */}
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      {/* Search header */}
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.backButton}
+          style={styles.backBtn}
           onPress={() => router.back()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           accessibilityLabel="Go back"
           accessibilityRole="button"
         >
           <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>
 
-        <View style={styles.inputWrapper}>
+        <View style={styles.inputRow}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             ref={inputRef}
             style={styles.input}
             value={query}
-            onChangeText={handleChangeText}
+            onChangeText={handleChange}
             placeholder="Search hadiths…"
             placeholderTextColor={colors.textMuted}
             autoFocus
             returnKeyType="search"
-            clearButtonMode="never"
-            accessibilityLabel="Search hadiths input"
-            accessibilityHint="Type Arabic or English text to search"
+            accessibilityLabel="Search hadiths"
           />
           {query.length > 0 && (
             <TouchableOpacity
@@ -154,7 +119,7 @@ export default function SearchScreen() {
               accessibilityLabel="Clear search"
               accessibilityRole="button"
             >
-              <Text style={styles.clearButton}>✕</Text>
+              <Text style={styles.clearBtn}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -165,31 +130,26 @@ export default function SearchScreen() {
   );
 }
 
-function SearchResultRow({ item, onPress }) {
+function ResultRow({ item, onPress }) {
   return (
     <TouchableOpacity
       style={styles.row}
       onPress={onPress}
       activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Hadith ${item.hadith_number}`}
     >
-      {/* Chapter + number */}
       <View style={styles.rowMeta}>
-        <Text style={styles.hadithLabel}>
-          Hadith {item.hadith_number}
-        </Text>
+        <Text style={styles.hadithLabel}>Hadith {item.hadith_number}</Text>
         {!!item.chapter_english_title && (
           <Text style={styles.chapterLabel} numberOfLines={1}>
             {item.chapter_english_title}
           </Text>
         )}
       </View>
-
-      {/* Arabic preview */}
-      <Text style={styles.arabicPreview} numberOfLines={2}>
+      <Text style={styles.arabicPreview} numberOfLines={2} accessibilityLanguage="ar">
         {item.arabic_text}
       </Text>
-
-      {/* English preview */}
       <Text style={styles.englishPreview} numberOfLines={2}>
         {item.english_text}
       </Text>
@@ -198,72 +158,47 @@ function SearchResultRow({ item, onPress }) {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  safe: { flex: 1, backgroundColor: colors.background },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
     gap: spacing.sm,
+    backgroundColor: colors.background,
   },
-  backButton: {
-    paddingRight: spacing.xs,
-  },
-  backText: {
-    fontSize: 26,
-    color: colors.primary,
-    lineHeight: 30,
-  },
-  inputWrapper: {
+  backBtn: { paddingRight: spacing.xs },
+  backText: { fontSize: 28, color: colors.primary, lineHeight: 32, marginTop: -2 },
+  inputRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.backgroundSecondary,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: spacing.sm,
-    height: 40,
+    height: 44,
   },
-  searchIcon: {
-    fontSize: 16,
-    marginRight: spacing.xs,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-    paddingVertical: 0,
-  },
-  clearButton: {
-    fontSize: 14,
-    color: colors.textMuted,
-    paddingLeft: spacing.xs,
-  },
+  searchIcon: { fontSize: 16, marginRight: spacing.xs },
+  input: { flex: 1, fontSize: 16, color: colors.text, paddingVertical: 0 },
+  clearBtn: { fontSize: 14, color: colors.textMuted, paddingLeft: spacing.xs },
 
-  // Results
-  resultsCount: {
+  count: {
     fontSize: 12,
     color: colors.textMuted,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xs,
   },
-  list: {
-    paddingBottom: spacing.xxl,
-  },
-  separator: {
-    height: 1,
+  list: { paddingBottom: spacing.xxl },
+  sep: {
+    height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
     marginLeft: spacing.md,
   },
 
-  // Row
   row: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
@@ -282,22 +217,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  chapterLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    flex: 1,
-  },
+  chapterLabel: { fontSize: 11, color: colors.textMuted, flex: 1 },
   arabicPreview: {
-    fontSize: 16,
-    lineHeight: 28,
+    fontSize: 17,
+    lineHeight: 30,
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
+    fontFamily: typography.fontFamily,
     marginBottom: spacing.xs,
   },
   englishPreview: {
     fontSize: 13,
     lineHeight: 20,
     color: colors.textSecondary,
+    fontFamily: typography.fontFamily,
   },
 });

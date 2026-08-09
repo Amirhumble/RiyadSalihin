@@ -10,11 +10,6 @@ import { ReadingProvider } from '@/context/ReadingContext';
 
 SplashScreen.preventAutoHideAsync();
 
-/**
- * AppShell sits inside AppProvider so it can read DB status.
- * AudioProvider is nested inside here — it will only mount once the DB
- * is ready, which is the correct moment to configure the audio session.
- */
 function AppShell() {
   const { dbStatus, dbError, retryInit } = useAppContext();
 
@@ -25,22 +20,27 @@ function AppShell() {
   }, [dbStatus]);
 
   if (dbStatus === DB_STATUS.IDLE || dbStatus === DB_STATUS.LOADING) {
-    return null; // splash screen still visible
+    // Splash screen visible — render nothing behind it
+    return null;
   }
 
   if (dbStatus === DB_STATUS.ERROR) {
+    // User-friendly error — never expose raw DB messages
+    if (dbError) console.error('[AppShell] DB init error:', dbError);
     return (
       <View style={styles.errorContainer}>
-        <Text style={styles.errorTitle}>Failed to open database</Text>
-        <Text style={styles.errorMessage}>{dbError?.message}</Text>
-        <TouchableOpacity onPress={retryInit} style={styles.retryBtn}>
-          <Text style={styles.retryText}>Tap to retry</Text>
+        <Text style={styles.errorIcon}>📖</Text>
+        <Text style={styles.errorTitle}>
+          Something went wrong while opening the book.
+        </Text>
+        <Text style={styles.errorMsg}>Please try again.</Text>
+        <TouchableOpacity onPress={retryInit} style={styles.retryBtn} activeOpacity={0.8}>
+          <Text style={styles.retryText}>Try Again</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // DB is ready — mount AudioProvider and the navigation stack together.
   return (
     <AudioProvider>
       <ReadingProvider>
@@ -68,28 +68,25 @@ const styles = StyleSheet.create({
     padding: 32,
     backgroundColor: '#fff',
   },
+  errorIcon: { fontSize: 44, marginBottom: 16 },
   errorTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#D32F2F',
-    marginBottom: 12,
+    fontWeight: '600',
+    color: '#1A1A1A',
     textAlign: 'center',
+    marginBottom: 8,
   },
-  errorMessage: {
+  errorMsg: {
     fontSize: 14,
-    color: '#444',
+    color: '#888',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
   },
   retryBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    backgroundColor: '#1B6CA8',
-    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    backgroundColor: '#1B5E7B',
+    borderRadius: 10,
   },
-  retryText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
+  retryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

@@ -1,3 +1,16 @@
+/**
+ * ChapterHadithsScreen — hadith list for one chapter.
+ *
+ * Visual philosophy:
+ *   - Dark blue header with chapter title (reference screenshot 2/3)
+ *   - Each row is large, clean, tappable — feels like a book table of contents
+ *   - Arabic text is the primary visible content
+ *   - English translation is secondary/truncated
+ *   - Audio indicator dot if audio exists (no confusing disabled player in list)
+ *   - Bookmark icon is small but visible
+ *   - Full row is tappable to open hadith detail
+ */
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -7,8 +20,8 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
+import DarkHeader from '@/components/common/DarkHeader';
 import EmptyState from '@/components/common/EmptyState';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
@@ -33,11 +46,8 @@ export default function ChapterHadithsScreen() {
   const { chapterId } = useLocalSearchParams();
   const id = Number(chapterId);
 
-  const {
-    data: chapter,
-    loading: chapterLoading,
-    error: chapterError,
-  } = useDbQuery(() => getChapterById(id), [id]);
+  const { data: chapter, loading: chapterLoading, error: chapterError } =
+    useDbQuery(() => getChapterById(id), [id]);
 
   const {
     data: hadiths,
@@ -47,338 +57,251 @@ export default function ChapterHadithsScreen() {
   } = useDbQuery(() => getHadithsByChapter(id), [id]);
 
   const loading = chapterLoading || hadithsLoading;
-  const error = chapterError || hadithsError;
+  const error   = chapterError  || hadithsError;
 
   if (loading) return <ScreenLoader />;
-  if (error) return <ScreenError message={error.message} onRetry={refetch} />;
+  if (error)   return <ScreenError onRetry={refetch} />;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel="Go back"
-          accessibilityRole="button"
-        >
-          <Text style={styles.backText}>‹ Back</Text>
-        </TouchableOpacity>
-
-        <View style={styles.headerTitleGroup}>
-          {chapter && (
-            <>
-              <Text style={styles.headerArabic} numberOfLines={1}>
-                {chapter.arabic_title}
-              </Text>
-              <Text style={styles.headerEnglish} numberOfLines={1}>
-                {chapter.english_title}
-              </Text>
-            </>
-          )}
-        </View>
-
-        <View style={styles.backButton} />
-      </View>
+    <View style={styles.root}>
+      <DarkHeader
+        onBack={() => router.back()}
+        title={chapter?.english_title ?? 'Chapter'}
+        titleArabic={chapter?.arabic_title}
+      />
 
       <FlatList
         data={hadiths}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
-          <HadithCard
+          <HadithRow
             hadith={item}
             onPress={() => router.push(`/hadith/${item.id}`)}
           />
         )}
         ListEmptyComponent={
           <EmptyState
-            icon="📜"
             title="No hadiths in this chapter"
-            subtitle="Content will appear here once the database is populated."
+            subtitle="Content will appear here once it is available."
           />
         }
         contentContainerStyle={
           hadiths?.length === 0 ? styles.emptyContainer : styles.list
         }
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
-// ─── HadithCard ──────────────────────────────────────────────────────────────
-//
-// Each card loads its own audio record lazily (only the first one).
-// Audio playback is routed through the global AudioContext so there is
-// never more than one active player in the application.
+// ─── HadithRow ────────────────────────────────────────────────────────────────
 
-function HadithCard({ hadith, onPress }) {
+function HadithRow({ hadith, onPress }) {
   const { currentAudio, isPlaying, loadAudio, pause } = useAudio();
 
-  const [bookmarked, setBookmarked] = useState(false);
-  // First audio record linked to this hadith, or null.
-  const [firstAudio, setFirstAudio] = useState(undefined); // undefined = not yet fetched
+  const [bookmarked, setBookmarked]   = useState(false);
+  const [firstAudio, setFirstAudio]   = useState(undefined);
 
-  // ── Load bookmark state ─────────────────────────────────────────────
+  // Load bookmark state
   useEffect(() => {
     let cancelled = false;
-    isBookmarked(hadith.id).then((val) => {
-      if (!cancelled) setBookmarked(val);
-    });
+    isBookmarked(hadith.id).then((v) => { if (!cancelled) setBookmarked(v); });
     return () => { cancelled = true; };
   }, [hadith.id]);
 
-  // ── Load audio record lazily ────────────────────────────────────────
+  // Load audio record lazily
   useEffect(() => {
     let cancelled = false;
     getAudiosForHadith(hadith.id)
-      .then((rows) => {
-        if (!cancelled) setFirstAudio(rows[0] ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setFirstAudio(null);
-      });
+      .then((rows) => { if (!cancelled) setFirstAudio(rows[0] ?? null); })
+      .catch(() => { if (!cancelled) setFirstAudio(null); });
     return () => { cancelled = true; };
   }, [hadith.id]);
 
-  // ── Derived audio state ─────────────────────────────────────────────
-  const isThisAudioPlaying =
-    isPlaying && currentAudio?.id === firstAudio?.id && !!firstAudio;
-
-  // ── Handlers ───────────────────────────────────────────────────────
-  const toggleBookmark = useCallback(
-    async (e) => {
-      e?.stopPropagation?.();
-      try {
-        if (bookmarked) {
-          await removeBookmark(hadith.id);
-          setBookmarked(false);
-        } else {
-          await addBookmark(hadith.id);
-          setBookmarked(true);
-        }
-      } catch (err) {
-        console.error('[HadithCard] bookmark error:', err);
-      }
-    },
-    [bookmarked, hadith.id]
-  );
-
-  const handleAudioPress = useCallback(
-    (e) => {
-      e?.stopPropagation?.();
-      if (!firstAudio) return;
-      if (isThisAudioPlaying) {
-        pause();
-      } else {
-        loadAudio(firstAudio, firstAudio.position_ms ?? 0);
-      }
-    },
-    [firstAudio, isThisAudioPlaying, loadAudio, pause]
-  );
-
-  // Audio button state:
-  //   undefined = still fetching record → show dimmed icon
-  //   null      = no audio for this hadith → show dimmed icon
-  //   record    = available → show active icon; playing = pause icon
   const hasAudio = !!firstAudio;
-  const audioIcon = isThisAudioPlaying ? '⏸' : '🎧';
+  const isThisPlaying = isPlaying && currentAudio?.id === firstAudio?.id && hasAudio;
+
+  const toggleBookmark = useCallback(async (e) => {
+    e?.stopPropagation?.();
+    try {
+      if (bookmarked) { await removeBookmark(hadith.id); setBookmarked(false); }
+      else            { await addBookmark(hadith.id);    setBookmarked(true);  }
+    } catch (err) {
+      console.error('[HadithRow] bookmark error:', err);
+    }
+  }, [bookmarked, hadith.id]);
+
+  const handleAudioPress = useCallback((e) => {
+    e?.stopPropagation?.();
+    if (!firstAudio) return;
+    if (isThisPlaying) pause();
+    else loadAudio(firstAudio, firstAudio.position_ms ?? 0);
+  }, [firstAudio, isThisPlaying, loadAudio, pause]);
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={styles.row}
       onPress={onPress}
       activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityLabel={`Hadith ${hadith.hadith_number}`}
       accessibilityHint="Opens full hadith"
     >
-      {/* ── Top row: number + actions ─────────────────────────── */}
-      <View style={styles.cardTopRow}>
-        <View style={styles.numberBadge}>
-          <Text style={styles.numberBadgeText}>{hadith.hadith_number}</Text>
-        </View>
-
-        <View style={styles.actions}>
-          {/* Audio button */}
-          <TouchableOpacity
-            style={[styles.actionBtn, !hasAudio && styles.actionBtnDisabled]}
-            onPress={hasAudio ? handleAudioPress : undefined}
-            disabled={!hasAudio}
-            activeOpacity={0.7}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            accessibilityRole="button"
-            accessibilityLabel={
-              !hasAudio
-                ? 'No audio available'
-                : isThisAudioPlaying
-                ? 'Pause audio'
-                : 'Play audio'
-            }
-            accessibilityState={{ disabled: !hasAudio }}
-          >
-            <Text style={styles.actionIcon}>{audioIcon}</Text>
-          </TouchableOpacity>
-
-          {/* Bookmark button */}
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={toggleBookmark}
-            activeOpacity={0.7}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            accessibilityRole="button"
-            accessibilityLabel={bookmarked ? 'Remove bookmark' : 'Add bookmark'}
-          >
-            <Text style={styles.actionIcon}>
-              {bookmarked ? '🔖' : '🏷️'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+      {/* Left: hadith number */}
+      <View style={styles.numCol}>
+        <Text style={styles.numText}>{hadith.hadith_number}</Text>
       </View>
 
-      {/* ── Arabic text ──────────────────────────────────────── */}
-      <Text
-        style={styles.arabicText}
-        numberOfLines={4}
-        accessibilityLanguage="ar"
-      >
-        {hadith.arabic_text}
-      </Text>
+      {/* Centre: text */}
+      <View style={styles.textCol}>
+        <Text
+          style={styles.arabicText}
+          numberOfLines={3}
+          accessibilityLanguage="ar"
+        >
+          {hadith.arabic_text}
+        </Text>
+        <Text style={styles.englishText} numberOfLines={2}>
+          {hadith.english_text}
+        </Text>
+      </View>
 
-      {/* ── Divider ──────────────────────────────────────────── */}
-      <View style={styles.inlineDivider} />
+      {/* Right: action icons stacked */}
+      <View style={styles.actionsCol}>
+        {/* Audio button */}
+        {firstAudio !== undefined && (
+          <TouchableOpacity
+            style={[styles.iconBtn, !hasAudio && styles.iconBtnDisabled]}
+            onPress={hasAudio ? handleAudioPress : undefined}
+            disabled={!hasAudio}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={isThisPlaying ? 'Pause audio' : 'Play audio'}
+            accessibilityState={{ disabled: !hasAudio }}
+          >
+            <View style={[styles.audioDot, isThisPlaying && styles.audioDotPlaying]} />
+            <Text style={[styles.iconBtnText, !hasAudio && styles.iconBtnTextDisabled]}>
+              {isThisPlaying ? '⏸' : '▶'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
-      {/* ── English translation ──────────────────────────────── */}
-      <Text style={styles.englishText} numberOfLines={3}>
-        {hadith.english_text}
-      </Text>
-
-      {/* ── Read more ────────────────────────────────────────── */}
-      <Text style={styles.readMore}>Read full hadith ›</Text>
+        {/* Bookmark button */}
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={toggleBookmark}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={bookmarked ? 'Remove bookmark' : 'Save bookmark'}
+        >
+          <Text style={[styles.bookmarkIcon, bookmarked && styles.bookmarkIconActive]}>
+            {bookmarked ? '★' : '☆'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe: {
+  root: {
     flex: 1,
-    backgroundColor: colors.backgroundSecondary,
+    backgroundColor: colors.backgroundWarm,
   },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-    backgroundColor: colors.background,
+  list: {
+    paddingBottom: spacing.xxl,
   },
-  backButton: { minWidth: 64 },
-  backText: { fontSize: 16, color: colors.primary, fontWeight: '500' },
-  headerTitleGroup: { flex: 1, alignItems: 'center' },
-  headerArabic: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-    writingDirection: 'rtl',
-    textAlign: 'center',
-  },
-  headerEnglish: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 1,
-    textAlign: 'center',
-  },
-
-  // List
-  list: { padding: spacing.md },
   emptyContainer: { flex: 1 },
-  separator: { height: spacing.sm },
-
-  // Card
-  card: {
-    backgroundColor: colors.background,
-    borderRadius: 14,
-    padding: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+    marginLeft: 80,
   },
 
-  // Card top row
-  cardTopRow: {
+  // Row
+  row: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.background,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.md,
+    minHeight: 80,
+  },
+
+  // Left column: hadith number
+  numCol: {
+    width: 44,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+    paddingTop: 3,
+    flexShrink: 0,
   },
-  numberBadge: {
-    backgroundColor: colors.primaryLight,
-    borderRadius: 6,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  numberBadgeText: {
-    fontSize: 12,
+  numText: {
+    fontSize: 13,
     fontWeight: '700',
     color: colors.primary,
   },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  actionBtn: {
-    padding: spacing.xs,
-    borderRadius: 6,
-    minWidth: 34,
-    minHeight: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnDisabled: { opacity: 0.3 },
-  actionIcon: { fontSize: 19 },
 
-  // Arabic
+  // Centre column: Arabic + English
+  textCol: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
   arabicText: {
-    fontSize: 19,
-    lineHeight: 36,
+    fontSize: 18,
+    lineHeight: 32,
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
     fontFamily: typography.fontFamily,
-    marginBottom: spacing.sm,
-  },
-
-  // Divider
-  inlineDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.divider,
-    marginBottom: spacing.sm,
-  },
-
-  // English
-  englishText: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: colors.textSecondary,
     marginBottom: spacing.xs,
+  },
+  englishText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textSecondary,
     fontFamily: typography.fontFamily,
   },
 
-  // Read more
-  readMore: {
-    fontSize: 12,
+  // Right column: icons
+  actionsCol: {
+    width: 36,
+    alignItems: 'center',
+    paddingTop: 2,
+    gap: spacing.sm,
+  },
+  iconBtn: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBtnDisabled: { opacity: 0.25 },
+  iconBtnText: {
+    fontSize: 16,
     color: colors.primary,
-    fontWeight: '500',
-    textAlign: 'right',
+  },
+  iconBtnTextDisabled: {
+    color: colors.textMuted,
+  },
+  // Small dot above audio icon when audio is available
+  audioDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.primaryLight,
+    marginBottom: 2,
+  },
+  audioDotPlaying: {
+    backgroundColor: colors.gold,
+  },
+  bookmarkIcon: {
+    fontSize: 20,
+    color: colors.textMuted,
+  },
+  bookmarkIconActive: {
+    color: colors.gold,
   },
 });

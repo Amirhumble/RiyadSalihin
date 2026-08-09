@@ -4,13 +4,25 @@ import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 
 export default function ScreenError({ message, onRetry }) {
+  // Never expose technical messages to the user.
+  // Log the raw message for development; show a friendly string.
+  if (message) console.warn('[ScreenError]', message);
+
   return (
     <View style={styles.container}>
       <Text style={styles.icon}>⚠️</Text>
       <Text style={styles.title}>Something went wrong</Text>
-      {!!message && <Text style={styles.message}>{message}</Text>}
+      <Text style={styles.message}>
+        We could not load this content. Please try again.
+      </Text>
       {!!onRetry && (
-        <TouchableOpacity style={styles.button} onPress={onRetry} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={onRetry}
+          activeOpacity={0.7}
+          accessibilityLabel="Try again"
+          accessibilityRole="button"
+        >
           <Text style={styles.buttonText}>Try again</Text>
         </TouchableOpacity>
       )}
@@ -38,16 +50,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   message: {
-    fontSize: 13,
+    fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
+    lineHeight: 22,
     marginBottom: spacing.lg,
   },
   button: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm + 2,
     backgroundColor: colors.primary,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   buttonText: {
     color: colors.textInverse,

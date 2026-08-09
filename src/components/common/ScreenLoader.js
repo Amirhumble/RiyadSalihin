@@ -1,11 +1,13 @@
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import colors from '@/constants/colors';
+import spacing from '@/constants/spacing';
 
-export default function ScreenLoader() {
+export default function ScreenLoader({ message }) {
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color={colors.primary} />
+      {!!message && <Text style={styles.message}>{message}</Text>}
     </View>
   );
 }
@@ -16,5 +18,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
+    gap: spacing.md,
+  },
+  message: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
   },
 });
