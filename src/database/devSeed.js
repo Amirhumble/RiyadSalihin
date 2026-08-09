@@ -10,13 +10,26 @@
  *  - Does NOT invent authentic hadith text.
  *  - 2 sample chapters, 4 sample hadiths, 3 dev audio tracks.
  *  - Audio tracks are linked through hadith_audio.
+ *
+ * DEPENDENCY DIRECTION
+ * ────────────────────
+ * database.js → devSeed.js (correct — one-way)
+ *
+ * devSeed.js intentionally does NOT import from database.js.
+ * The already-open db instance is passed in as a parameter by database.js
+ * after initDatabase() completes.  This breaks the circular dependency:
+ *   database.js ↔ devSeed.js   ← was a cycle
+ *   database.js → devSeed.js   ← correct, cycle-free
  */
 
-import { getDatabase } from './database';
-
-export async function runDevSeed() {
-  const db = getDatabase();
-
+/**
+ * Seeds the database with development-only placeholder data.
+ * Only runs when the chapters table is empty.
+ *
+ * @param {import('expo-sqlite').SQLiteDatabase} db  — already-open DB instance
+ * @returns {Promise<void>}
+ */
+export async function runDevSeed(db) {
   // Guard: skip if data already exists.
   const existing = await db.getFirstAsync(
     'SELECT COUNT(*) AS count FROM chapters;'
@@ -102,8 +115,6 @@ export async function runDevSeed() {
     );
 
     // ── DEV audio records ─────────────────────────────────────────────
-    // Filenames MUST match files placed in assets/audio/.
-    // The app handles missing files gracefully — no crash if MP3 absent.
     await db.runAsync(
       `INSERT INTO audios (title, filename, chapter_id, ordering)
        VALUES (?, ?, ?, ?);`,
