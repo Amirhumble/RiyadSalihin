@@ -1,34 +1,51 @@
 const colors = {
-  // Brand
-  primary: '#1B6CA8',
-  primaryDark: '#145089',
-  primaryLight: '#E8F4FD',
+  // ── Brand / Islamic deep blue ────────────────────────────────────────
+  primary:        '#1B5E7B',   // deep teal-blue (nav headers, hero)
+  primaryDark:    '#113F56',   // darker shade for pressed states
+  primaryLight:   '#E1EFF5',   // very light tint for backgrounds
+  primaryMid:     '#2A7A9E',   // mid-tone for accents
 
-  // Backgrounds
-  background: '#FFFFFF',
-  backgroundSecondary: '#F5F5F5',
-  surface: '#FFFFFF',
+  // ── Accent ───────────────────────────────────────────────────────────
+  gold:           '#C9A84C',   // warm gold for decorative elements
+  goldLight:      '#F5EAC8',   // light gold tint
 
-  // Text
-  text: '#1A1A1A',
-  textSecondary: '#666666',
-  textMuted: '#999999',
-  textInverse: '#FFFFFF',
+  // ── Hero / full-bleed section ─────────────────────────────────────
+  hero:           '#1B5E7B',   // hero background
+  heroDark:       '#0D3A4D',   // gradient dark end
+  heroText:       '#FFFFFF',
+  heroSubtext:    'rgba(255,255,255,0.75)',
+  heroMuted:      'rgba(255,255,255,0.5)',
 
-  // UI
-  border: '#E0E0E0',
-  borderLight: '#F0F0F0',
-  divider: '#EEEEEE',
+  // ── Backgrounds ───────────────────────────────────────────────────
+  background:     '#FFFFFF',
+  backgroundWarm: '#FAFAF8',   // warm off-white for reading
+  backgroundSecondary: '#F4F4F4',
+  surface:        '#FFFFFF',
 
-  // States
-  error: '#D32F2F',
-  success: '#388E3C',
-  warning: '#F57C00',
+  // ── Text ──────────────────────────────────────────────────────────
+  text:           '#1A1A1A',
+  textSecondary:  '#555555',
+  textMuted:      '#888888',
+  textInverse:    '#FFFFFF',
 
-  // Tab bar
-  tabActive: '#1B6CA8',
-  tabInactive: '#999999',
-  tabBackground: '#FFFFFF',
+  // ── UI ────────────────────────────────────────────────────────────
+  border:         '#DDDDDD',
+  borderLight:    '#EEEEEE',
+  divider:        '#EBEBEB',
+
+  // ── Chapter row background ─────────────────────────────────────────
+  chapterRow:     '#FFFFFF',
+  chapterRowAlt:  '#F8FAFB',
+
+  // ── States ────────────────────────────────────────────────────────
+  error:          '#C0392B',
+  success:        '#2E7D52',
+  warning:        '#E67E22',
+
+  // ── Tab bar ───────────────────────────────────────────────────────
+  tabActive:      '#1B5E7B',
+  tabInactive:    '#999999',
+  tabBackground:  '#FFFFFF',
 };
 
 export default colors;

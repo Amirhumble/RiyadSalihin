@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { StyleSheet } from 'react-native';
 
 import TabBarIcon from '@/components/ui/TabBarIcon';
 import colors from '@/constants/colors';
@@ -8,17 +9,10 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.tabActive,
+        tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.tabInactive,
-        tabBarStyle: {
-          backgroundColor: colors.tabBackground,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
-        },
+        tabBarStyle: styles.tabBar,
+        tabBarLabelStyle: styles.tabLabel,
       }}
     >
       <Tabs.Screen
@@ -33,7 +27,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="bookmarks"
         options={{
-          title: 'Bookmarks',
+          title: 'Saved',
           tabBarIcon: ({ color, size }) => (
             <TabBarIcon name="bookmark" color={color} size={size} />
           ),
@@ -51,3 +45,18 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBar: {
+    backgroundColor: colors.background,
+    borderTopColor: colors.divider,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    height: 60,
+    paddingBottom: 6,
+    paddingTop: 4,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+});

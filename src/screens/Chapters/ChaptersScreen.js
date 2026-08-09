@@ -1,3 +1,16 @@
+/**
+ * ChaptersScreen — large-button chapter selection.
+ *
+ * Visual philosophy (reference screenshot 2):
+ *   - Dark blue header with title
+ *   - Large vertically-stacked chapter buttons
+ *   - Immediate clarity: user knows to tap a chapter
+ *   - Chapter number badge is prominent
+ *   - Arabic title is the primary label
+ *   - English title is secondary
+ *   - Hadith count is small and unobtrusive
+ */
+
 import { useRouter } from 'expo-router';
 import {
     FlatList,
@@ -6,8 +19,8 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
+import DarkHeader from '@/components/common/DarkHeader';
 import EmptyState from '@/components/common/EmptyState';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
@@ -20,97 +33,79 @@ import { useDbQuery } from '@/hooks/useDbQuery';
 export default function ChaptersScreen() {
   const router = useRouter();
 
-  const {
-    data: chapters,
-    loading,
-    error,
-    refetch,
-  } = useDbQuery(() => getAllChaptersWithCounts(), []);
+  const { data: chapters, loading, error, refetch } = useDbQuery(
+    () => getAllChaptersWithCounts(),
+    []
+  );
 
   if (loading) return <ScreenLoader />;
-  if (error)   return <ScreenError message={error.message} onRetry={refetch} />;
+  if (error)   return <ScreenError onRetry={refetch} />;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel="Go back"
-          accessibilityRole="button"
-        >
-          <Text style={styles.backText}>‹ Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Chapters</Text>
-        <View style={styles.backButton} />
-      </View>
+    <View style={styles.root}>
+      <DarkHeader
+        onBack={() => router.back()}
+        title="Chapters"
+      />
 
       <FlatList
         data={chapters}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <ChapterRow
+        renderItem={({ item, index }) => (
+          <ChapterButton
             chapter={item}
+            index={index}
             onPress={() => router.push(`/chapter/${item.id}`)}
           />
         )}
         ListEmptyComponent={
           <EmptyState
-            icon="📚"
             title="No chapters yet"
-            subtitle="Content will appear here once the database is populated."
+            subtitle="The book content will appear here."
           />
         }
         contentContainerStyle={
           chapters?.length === 0 ? styles.emptyContainer : styles.list
         }
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
-// ─── ChapterRow ───────────────────────────────────────────────────────────────
+// ─── ChapterButton ────────────────────────────────────────────────────────────
 
-function ChapterRow({ chapter, onPress }) {
+function ChapterButton({ chapter, onPress }) {
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={styles.btn}
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityLabel={`Chapter ${chapter.chapter_number}: ${chapter.english_title}`}
-      accessibilityHint="Opens hadith list for this chapter"
+      accessibilityHint="Opens hadith list"
     >
-      {/* Chapter number circle */}
-      <View style={styles.chapterNumberCircle}>
-        <Text style={styles.chapterNumberText}>{chapter.chapter_number}</Text>
+      {/* Number badge */}
+      <View style={styles.numBadge}>
+        <Text style={styles.numText}>{chapter.chapter_number}</Text>
       </View>
 
-      {/* Text content */}
-      <View style={styles.chapterInfo}>
-        <Text
-          style={styles.arabicTitle}
-          numberOfLines={2}
-          accessibilityLanguage="ar"
-        >
+      {/* Text */}
+      <View style={styles.btnText}>
+        <Text style={styles.arabicTitle} numberOfLines={2} accessibilityLanguage="ar">
           {chapter.arabic_title}
         </Text>
         <Text style={styles.englishTitle} numberOfLines={2}>
           {chapter.english_title}
         </Text>
-        {chapter.hadith_count != null && (
-          <View style={styles.countRow}>
-            <Text style={styles.hadithCount}>
-              {chapter.hadith_count}{' '}
-              {chapter.hadith_count === 1 ? 'hadith' : 'hadiths'}
-            </Text>
-          </View>
+        {chapter.hadith_count > 0 && (
+          <Text style={styles.hadithCount}>
+            {chapter.hadith_count} {chapter.hadith_count === 1 ? 'hadith' : 'hadiths'}
+          </Text>
         )}
       </View>
 
+      {/* Chevron */}
       <Text style={styles.chevron}>›</Text>
     </TouchableOpacity>
   );
@@ -119,103 +114,84 @@ function ChapterRow({ chapter, onPress }) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe: {
+  root: {
     flex: 1,
     backgroundColor: colors.background,
   },
 
-  // Header
-  header: {
+  list: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  emptyContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+  },
+
+  // Chapter button — large, obvious, easy to tap
+  btn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
     backgroundColor: colors.background,
-  },
-  backButton: { minWidth: 64 },
-  backText: {
-    fontSize: 16,
-    color: colors.primary,
-    fontWeight: '500',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-  },
-
-  // List
-  list: { paddingVertical: spacing.xs },
-  emptyContainer: { flex: 1 },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.divider,
-    marginLeft: spacing.md + 52,
-  },
-
-  // Row
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    borderRadius: 14,
     paddingVertical: spacing.md,
-    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    marginVertical: spacing.xs,
     minHeight: 72,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderLight,
+    // subtle shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
 
-  // Chapter number circle
-  chapterNumberCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  numBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
     flexShrink: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(27,94,123,0.15)',
   },
-  chapterNumberText: {
-    fontSize: 14,
+  numText: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.primary,
   },
 
-  // Text content
-  chapterInfo: {
+  btnText: {
     flex: 1,
     marginRight: spacing.sm,
   },
   arabicTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
     fontFamily: typography.fontFamily,
+    lineHeight: 26,
     marginBottom: 3,
   },
   englishTitle: {
     fontSize: 13,
     color: colors.textSecondary,
     fontFamily: typography.fontFamily,
-    marginBottom: 3,
-  },
-  countRow: {
-    flexDirection: 'row',
+    lineHeight: 19,
+    marginBottom: 2,
   },
   hadithCount: {
     fontSize: 11,
     color: colors.textMuted,
-    backgroundColor: colors.backgroundSecondary,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
   },
 
-  // Chevron
   chevron: {
     fontSize: 22,
     color: colors.textMuted,

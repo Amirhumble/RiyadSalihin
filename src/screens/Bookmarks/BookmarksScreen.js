@@ -26,37 +26,28 @@ export default function BookmarksScreen() {
   const router = useRouter();
   const { isDbReady } = useAppContext();
 
-  const [bookmarks, setBookmarks] = useState(null);
-  const [loading, setLoading]     = useState(true);
+  const [bookmarks, setBookmarks]   = useState(null);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]         = useState(null);
+  const [error, setError]           = useState(null);
 
-  const loadBookmarks = useCallback(
-    async ({ silent = false } = {}) => {
-      if (!isDbReady) return;
-      if (!silent) setLoading(true);
-      setError(null);
-      try {
-        const data = await getBookmarks();
-        setBookmarks(data);
-      } catch (err) {
-        console.error('[BookmarksScreen] load error:', err);
-        setError(err);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [isDbReady]
-  );
+  const loadBookmarks = useCallback(async ({ silent = false } = {}) => {
+    if (!isDbReady) return;
+    if (!silent) setLoading(true);
+    setError(null);
+    try {
+      const data = await getBookmarks();
+      setBookmarks(data);
+    } catch (err) {
+      console.error('[BookmarksScreen]', err);
+      setError(err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [isDbReady]);
 
-  // Reload every time this tab comes into focus — picks up bookmark changes
-  // made on HadithDetailScreen or ChapterHadithsScreen.
-  useFocusEffect(
-    useCallback(() => {
-      loadBookmarks();
-    }, [loadBookmarks])
-  );
+  useFocusEffect(useCallback(() => { loadBookmarks(); }, [loadBookmarks]));
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -66,26 +57,22 @@ export default function BookmarksScreen() {
   const handleRemove = useCallback(async (hadithId) => {
     try {
       await removeBookmark(hadithId);
-      // Optimistic update — remove from local state immediately.
-      setBookmarks((prev) =>
-        prev ? prev.filter((b) => b.id !== hadithId) : prev
-      );
+      setBookmarks((prev) => prev ? prev.filter((b) => b.id !== hadithId) : prev);
     } catch (err) {
       console.error('[BookmarksScreen] remove error:', err);
     }
   }, []);
 
   if (loading) return <ScreenLoader />;
-  if (error)   return <ScreenError message={error.message} onRetry={loadBookmarks} />;
+  if (error)   return <ScreenError onRetry={loadBookmarks} />;
 
   return (
-    <SafeAreaView style={styles.safe}>
-      {/* ── Header ─────────────────────────────────────────────── */}
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Bookmarks</Text>
+        <Text style={styles.headerTitle}>Saved Hadiths</Text>
         {bookmarks?.length > 0 && (
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{bookmarks.length}</Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{bookmarks.length}</Text>
           </View>
         )}
       </View>
@@ -102,15 +89,12 @@ export default function BookmarksScreen() {
         )}
         ListEmptyComponent={
           <EmptyState
-            icon="🔖"
-            title="No bookmarks yet"
-            subtitle="Tap the bookmark icon on any hadith to save it here."
+            title="No saved hadiths yet"
+            subtitle="When you save a hadith using the bookmark icon, it will appear here."
           />
         }
-        contentContainerStyle={
-          bookmarks?.length === 0 ? styles.emptyContainer : styles.list
-        }
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        contentContainerStyle={bookmarks?.length === 0 ? styles.emptyContainer : styles.list}
+        ItemSeparatorComponent={() => <View style={styles.sep} />}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -119,12 +103,11 @@ export default function BookmarksScreen() {
             colors={[colors.primary]}
           />
         }
+        showsVerticalScrollIndicator={false}
       />
     </SafeAreaView>
   );
 }
-
-// ─── BookmarkRow ─────────────────────────────────────────────────────────────
 
 function BookmarkRow({ item, onPress, onRemove }) {
   return (
@@ -134,34 +117,21 @@ function BookmarkRow({ item, onPress, onRemove }) {
       activeOpacity={0.75}
       accessibilityRole="button"
       accessibilityLabel={`Hadith ${item.hadith_number}`}
-      accessibilityHint="Opens full hadith"
     >
       <View style={styles.rowContent}>
-        {/* Label row */}
-        <Text style={styles.hadithLabel}>Hadith {item.hadith_number}</Text>
-
-        {/* Arabic preview */}
-        <Text
-          style={styles.arabicText}
-          numberOfLines={2}
-          accessibilityLanguage="ar"
-        >
+        <Text style={styles.numLabel}>Hadith {item.hadith_number}</Text>
+        <Text style={styles.arabicText} numberOfLines={2} accessibilityLanguage="ar">
           {item.arabic_text}
         </Text>
-
-        {/* English preview */}
         <Text style={styles.englishText} numberOfLines={2}>
           {item.english_text}
         </Text>
       </View>
-
-      {/* Remove button */}
       <TouchableOpacity
-        style={styles.removeButton}
+        style={styles.removeBtn}
         onPress={onRemove}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        activeOpacity={0.7}
-        accessibilityLabel="Remove bookmark"
+        accessibilityLabel="Remove from saved"
         accessibilityRole="button"
       >
         <Text style={styles.removeIcon}>✕</Text>
@@ -170,15 +140,9 @@ function BookmarkRow({ item, onPress, onRemove }) {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  safe: { flex: 1, backgroundColor: colors.background },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -188,38 +152,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.divider,
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.text,
-    flex: 1,
-  },
-  countBadge: {
+  headerTitle: { fontSize: 22, fontWeight: '700', color: colors.text, flex: 1 },
+  badge: {
     backgroundColor: colors.primaryLight,
     borderRadius: 10,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
-  countBadgeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
+  badgeText: { fontSize: 13, fontWeight: '600', color: colors.primary },
 
-  // List
-  list: {
-    paddingVertical: spacing.xs,
-  },
-  emptyContainer: {
-    flex: 1,
-  },
-  separator: {
+  list: { paddingBottom: spacing.xxl },
+  emptyContainer: { flex: 1 },
+  sep: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
     marginLeft: spacing.lg,
   },
 
-  // Row
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -227,18 +176,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     backgroundColor: colors.background,
   },
-  rowContent: {
-    flex: 1,
-    marginRight: spacing.md,
-  },
-
-  hadithLabel: {
+  rowContent: { flex: 1, marginRight: spacing.md },
+  numLabel: {
     fontSize: 11,
     fontWeight: '700',
     color: colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 5,
+    marginBottom: 4,
   },
   arabicText: {
     fontSize: 16,
@@ -255,13 +200,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontFamily: typography.fontFamily,
   },
-
-  removeButton: {
-    padding: spacing.xs,
-    alignSelf: 'flex-start',
-  },
-  removeIcon: {
-    fontSize: 16,
-    color: colors.textMuted,
-  },
+  removeBtn: { padding: spacing.xs, alignSelf: 'flex-start' },
+  removeIcon: { fontSize: 16, color: colors.textMuted },
 });
