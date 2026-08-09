@@ -116,19 +116,19 @@ export async function runDevSeed(db) {
 
     // ── DEV audio records ─────────────────────────────────────────────
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_id, ordering)
-       VALUES (?, ?, ?, ?);`,
-      ['[DEV] Track 001', '001.mp3', ch1.id, 1]
+      `INSERT INTO audios (title, filename, chapter_id, ordering, pdf_page)
+       VALUES (?, ?, ?, ?, ?);`,
+      ['[DEV] Track 001', '001.mp3', ch1.id, 1, 1]
     );
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_id, ordering)
-       VALUES (?, ?, ?, ?);`,
-      ['[DEV] Track 002', '002.mp3', ch1.id, 2]
+      `INSERT INTO audios (title, filename, chapter_id, ordering, pdf_page)
+       VALUES (?, ?, ?, ?, ?);`,
+      ['[DEV] Track 002', '002.mp3', ch1.id, 2, 1]
     );
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_id, ordering)
-       VALUES (?, ?, ?, ?);`,
-      ['[DEV] Track 003', '003.mp3', ch1.id, 3]
+      `INSERT INTO audios (title, filename, chapter_id, ordering, pdf_page)
+       VALUES (?, ?, ?, ?, ?);`,
+      ['[DEV] Track 003', '003.mp3', ch1.id, 3, 1]
     );
 
     const aRow1 = await db.getFirstAsync(

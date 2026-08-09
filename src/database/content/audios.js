@@ -3,79 +3,65 @@
  *
  * HOW TO USE
  * ──────────
- * Replace the placeholder array below with the real audio records.
  * Each object must match this shape:
  *
  *   {
- *     filename       : string   — bare filename, e.g. '001.mp3'
- *                                 Must match a file in assets/audio/
- *                                 and a key in audioAssets.js
- *     title          : string   — human-readable track title
- *     chapter_number : number   — optional; chapter this track belongs to
- *                                 Set to null if the track spans multiple chapters
- *     ordering       : number   — display ordering within its chapter (0-based ok)
+ *     filename       : string        — bare filename, e.g. '001.mp3'
+ *     title          : string        — human-readable track title
+ *     chapter_number : number | null — chapter this track belongs to
+ *     ordering       : number        — display ordering (used as track number)
+ *     pdf_page       : number | null — PDF page where this track begins
+ *                                      Set to null until the real mapping
+ *                                      is confirmed.
  *   }
  *
- * IMPORTANT
- * ─────────
- * - Do NOT put SQL here.  This file contains DATA ONLY.
- * - Do NOT use database IDs here.  IDs are resolved at import time.
- * - chapter_number is optional (nullable).  Use it when a track belongs
- *   to exactly one chapter so getAudiosByChapter() can find it directly.
- * - duration_ms is intentionally absent — it is discovered at playback time.
- * - position_ms is intentionally absent — it is a user-state field.
+ * HOW TO MAP AUDIO → PDF PAGE
+ * ───────────────────────────
+ * Set pdf_page to the page number in the PDF where that audio section starts.
+ * Example:
+ *   { filename: '001.mp3', ..., pdf_page: 18 }
+ *   { filename: '002.mp3', ..., pdf_page: 24 }
  *
- * RUNTIME ASSET MAPPING
- * ─────────────────────
- * This file does NOT perform Metro require() calls.
- * The runtime mapping between filenames and bundled assets lives in:
- *   src/services/audioAssets.js
- * Add an entry there for each filename added here.
+ * The ReaderScreen reads audio.pdf_page and opens the PDF at that page.
+ * You do NOT need to change any UI code — only update this file.
+ *
+ * HOW TO ADD THE REAL 40–50 FILES
+ * ────────────────────────────────
+ * 1. Add the MP3 to assets/audio/
+ * 2. Add one entry here (with the real pdf_page when known)
+ * 3. Add the Metro mapping to src/services/audioAssets.js
+ * 4. Run the audioImporter (one-time, explicit call)
  *
  * CURRENT STATE
  * ─────────────
- * Three development entries match the existing devSeed.js and audioAssets.js.
- * When the real 40–50 production files are ready, replace these entries.
+ * Three development entries. pdf_page values are test placeholders only.
  */
 
-/**
- * @type {Array<{
- *   filename       : string,
- *   title          : string,
- *   chapter_number : number | null,
- *   ordering       : number,
- * }>}
- */
 const audios = [
-  // ── Development tracks — matches devSeed.js and audioAssets.js ─────────
-  // Remove or replace these when adding the real 40–50 production files.
   {
-    filename: '001.mp3',
-    title: '[DEV] Track 001',
+    filename:       '001.mp3',
+    title:          '[DEV] Track 001',
     chapter_number: 1,
-    ordering: 1,
+    ordering:       1,
+    pdf_page:       1,   // PLACEHOLDER — replace with real page number
   },
   {
-    filename: '002.mp3',
-    title: '[DEV] Track 002',
+    filename:       '002.mp3',
+    title:          '[DEV] Track 002',
     chapter_number: 1,
-    ordering: 2,
+    ordering:       2,
+    pdf_page:       1,   // PLACEHOLDER — replace with real page number
   },
   {
-    filename: '003.mp3',
-    title: '[DEV] Track 003',
+    filename:       '003.mp3',
+    title:          '[DEV] Track 003',
     chapter_number: 1,
-    ordering: 3,
+    ordering:       3,
+    pdf_page:       1,   // PLACEHOLDER — replace with real page number
   },
 
-  // ── Production tracks will go here ─────────────────────────────────────
-  // Example:
-  // {
-  //   filename: '004.mp3',
-  //   title: 'Chapter 2 — Repentance',
-  //   chapter_number: 2,
-  //   ordering: 1,
-  // },
+  // ── Production tracks ─────────────────────────────────────────────────
+  // { filename: '004.mp3', title: '...', chapter_number: 2, ordering: 1, pdf_page: 35 },
 ];
 
 export default audios;

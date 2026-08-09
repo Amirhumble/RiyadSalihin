@@ -1,3 +1,16 @@
+/**
+ * Root layout.
+ *
+ * Navigation flow:
+ *   index  (IntroScreen  — shows once, replaces to /list)
+ *   list   (AudioListScreen — main screen)
+ *   reader (ReaderScreen  — PDF + audio, opened with ?audioId=N)
+ *
+ * The old (tabs)/ group and chapter/hadith routes still exist on disk
+ * and can be reached by direct URL, but they are no longer part of the
+ * primary user flow and no UI links to them.
+ */
+
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -19,16 +32,15 @@ function AppShell() {
     }
   }, [dbStatus]);
 
+  // While DB is initialising, keep the native splash screen visible.
   if (dbStatus === DB_STATUS.IDLE || dbStatus === DB_STATUS.LOADING) {
-    // Splash screen visible — render nothing behind it
     return null;
   }
 
   if (dbStatus === DB_STATUS.ERROR) {
-    // User-friendly error — never expose raw DB messages
     if (dbError) console.error('[AppShell] DB init error:', dbError);
     return (
-      <View style={styles.errorContainer}>
+      <View style={styles.errorScreen}>
         <Text style={styles.errorIcon}>📖</Text>
         <Text style={styles.errorTitle}>
           Something went wrong while opening the book.
@@ -44,7 +56,12 @@ function AppShell() {
   return (
     <AudioProvider>
       <ReadingProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          {/* Core 3-screen flow */}
+          <Stack.Screen name="index"  options={{ animation: 'none' }} />
+          <Stack.Screen name="list"   options={{ animation: 'fade' }} />
+          <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom' }} />
+        </Stack>
       </ReadingProvider>
     </AudioProvider>
   );
@@ -61,14 +78,14 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  errorContainer: {
+  errorScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
     backgroundColor: '#fff',
   },
-  errorIcon: { fontSize: 44, marginBottom: 16 },
+  errorIcon:  { fontSize: 44, marginBottom: 16 },
   errorTitle: {
     fontSize: 18,
     fontWeight: '600',
