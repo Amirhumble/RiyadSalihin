@@ -1,12 +1,8 @@
 /**
- * AudioListScreen — the main screen of the application.
+ * AudioListScreen — main screen of the application.
  *
- * Displays all available audio tracks in a scrollable list.
- * Each row shows the track number, title, chapter/hadith context,
- * duration (when known), and a play button.
- *
- * Tapping anywhere on a row opens the Reader.
- * Audio data comes entirely from SQLite — nothing is hardcoded here.
+ * Shows all audio lessons in a clean scrollable list.
+ * Tapping any row opens the Reader with that audio.
  */
 
 import { useRouter } from 'expo-router';
@@ -29,22 +25,20 @@ import { getAllAudiosWithChapterInfo } from '@/database/repositories/audioReposi
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// Format milliseconds → "m:ss" or null
-function formatDuration(ms) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtMs(ms) {
   if (!ms || ms <= 0) return null;
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// Format seconds → "m:ss"
-function formatSecs(sec) {
+function fmtSec(sec) {
   if (!sec || sec <= 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 }
+
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function AudioListScreen() {
   const router = useRouter();
@@ -54,27 +48,40 @@ export default function AudioListScreen() {
     []
   );
 
-  if (loading) return <ScreenLoader message="Loading…" />;
-  if (error)   return <ScreenError onRetry={refetch} />;
+  if (loading) return <ScreenLoader message="Loading lessons…" />;
+  if (error)   return (
+    <ScreenError
+      message="Something went wrong while loading the lessons."
+      onRetry={refetch}
+    />
+  );
+
+  const count = audios?.length ?? 0;
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
-      {/* ── Dark header ─────────────────────────────────────────── */}
+      {/* ── Header ──────────────────────────────────────────────── */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
+          {/* Decorative gold rule */}
+          <View style={styles.headerGoldRule} />
+
           <Text style={styles.headerArabic}>رياض الصالحين</Text>
           <Text style={styles.headerLatin}>Riyad as-Salihin</Text>
-          <Text style={styles.headerSub}>
-            {audios?.length
-              ? `${audios.length} recitation${audios.length !== 1 ? 's' : ''}`
-              : ''}
+
+          <View style={styles.headerDivider} />
+
+          <Text style={styles.headerInstruction}>
+            {count > 0
+              ? `${count} lesson${count !== 1 ? 's' : ''} · Tap to listen and read`
+              : 'Select a lesson to listen and read'}
           </Text>
         </View>
       </SafeAreaView>
 
-      {/* ── Audio list ──────────────────────────────────────────── */}
+      {/* ── List ────────────────────────────────────────────────── */}
       <FlatList
         data={audios}
         keyExtractor={(item) => String(item.id)}
@@ -84,20 +91,31 @@ export default function AudioListScreen() {
             onPress={() => router.push(`/reader?audioId=${item.id}`)}
           />
         )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No audio available yet.</Text>
-            <Text style={styles.emptySubtext}>
-              Audio recitations will appear here once they are added.
-            </Text>
-          </View>
-        }
-        contentContainerStyle={
-          audios?.length === 0 ? styles.emptyContainer : styles.listContent
-        }
+        ListEmptyComponent={<EmptyView />}
+        contentContainerStyle={count === 0 ? styles.emptyFill : styles.listContent}
         showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ItemSeparatorComponent={Separator}
       />
+    </View>
+  );
+}
+
+// ── Separator ─────────────────────────────────────────────────────────────────
+
+function Separator() {
+  return <View style={styles.separator} />;
+}
+
+// ── EmptyView ─────────────────────────────────────────────────────────────────
+
+function EmptyView() {
+  return (
+    <View style={styles.empty}>
+      <Text style={styles.emptyIcon}>📖</Text>
+      <Text style={styles.emptyTitle}>No lessons available yet.</Text>
+      <Text style={styles.emptySub}>
+        Lessons will appear here once they are added.
+      </Text>
     </View>
   );
 }
@@ -107,74 +125,100 @@ export default function AudioListScreen() {
 function AudioRow({ audio, onPress }) {
   const { currentAudio, isPlaying } = useAudio();
 
-  const isActive  = currentAudio?.id === audio.id;
-  const isThisPlaying = isActive && isPlaying;
+  const isActive      = currentAudio?.id === audio.id;
+  const isNowPlaying  = isActive && isPlaying;
 
-  // progress ratio from saved position + duration
-  const hasDuration = audio.duration_ms > 0;
+  const hasDuration   = audio.duration_ms > 0;
+  const hasPosition   = (audio.position_ms ?? 0) > 500; // ignore sub-half-second noise
   const progressRatio = hasDuration
     ? Math.min((audio.position_ms ?? 0) / audio.duration_ms, 1)
     : 0;
-  const hasProgress = progressRatio > 0.005;
+  const isCompleted   = hasDuration && progressRatio >= 0.98;
+  const inProgress    = hasPosition && !isCompleted;
+
+  const rangeLabel = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
+  const duration   = fmtMs(audio.duration_ms);
+  const position   = fmtSec((audio.position_ms ?? 0) / 1000);
 
   return (
     <TouchableOpacity
       style={[styles.row, isActive && styles.rowActive]}
       onPress={onPress}
-      activeOpacity={0.78}
+      activeOpacity={0.72}
       accessibilityRole="button"
-      accessibilityLabel={audio.title}
-      accessibilityHint="Open to read and listen"
+      accessibilityLabel={`Lesson ${audio.ordering}: ${audio.title}`}
+      accessibilityHint="Tap to open and listen"
+      accessibilityState={{ selected: isActive }}
     >
-      {/* ── Left: number ───────────────────────────────────────── */}
-      <View style={[styles.numCol, isActive && styles.numColActive]}>
-        <Text style={[styles.numText, isActive && styles.numTextActive]}>
+      {/* Number badge */}
+      <View style={[styles.badge, isActive && styles.badgeActive]}>
+        <Text style={[styles.badgeText, isActive && styles.badgeTextActive]}>
           {String(audio.ordering).padStart(2, '0')}
         </Text>
       </View>
 
-      {/* ── Centre: info ───────────────────────────────────────── */}
-      <View style={styles.infoCol}>
-        <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={2}>
+      {/* Centre info */}
+      <View style={styles.info}>
+        {/* Title */}
+        <Text
+          style={[styles.title, isActive && styles.titleActive]}
+          numberOfLines={2}
+        >
           {audio.title}
         </Text>
 
-        {/* Hadith range / Introduction */}
-        {(() => {
-          const label = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
-          return label ? (
-            <Text style={styles.meta} numberOfLines={1}>{label}</Text>
-          ) : null;
-        })()}
+        {/* Hadith range label */}
+        {rangeLabel ? (
+          <Text style={styles.range} numberOfLines={1}>{rangeLabel}</Text>
+        ) : null}
 
-        {/* Duration + progress */}
-        <View style={styles.bottomRow}>
-          {hasDuration ? (
-            <Text style={styles.duration}>
-              {formatDuration(audio.duration_ms)}
-            </Text>
+        {/* Bottom row: duration / progress / resume label */}
+        <View style={styles.meta}>
+          {duration ? (
+            <Text style={styles.metaText}>{duration}</Text>
           ) : null}
 
-          {/* Progress bar if user has started listening */}
-          {hasProgress && (
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.round(progressRatio * 100)}%` }]} />
-            </View>
+          {inProgress && (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={[styles.metaText, styles.resumeLabel]}>
+                {`Continue · ${position}`}
+              </Text>
+            </>
           )}
 
-          {/* Saved position label */}
-          {audio.position_ms > 0 && (
-            <Text style={styles.posLabel}>
-              {formatSecs(audio.position_ms / 1000)} played
-            </Text>
+          {isCompleted && (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={[styles.metaText, styles.completedLabel]}>Completed</Text>
+            </>
           )}
         </View>
+
+        {/* Progress bar */}
+        {inProgress && hasDuration && (
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${Math.round(progressRatio * 100)}%` },
+              ]}
+            />
+          </View>
+        )}
       </View>
 
-      {/* ── Right: play indicator ──────────────────────────────── */}
-      <View style={[styles.playCol, isThisPlaying && styles.playColActive]}>
-        <Text style={[styles.playIcon, isThisPlaying && styles.playIconActive]}>
-          {isThisPlaying ? '▶' : '▷'}
+      {/* Play indicator */}
+      <View
+        style={[
+          styles.playBtn,
+          isActive && styles.playBtnActive,
+          isNowPlaying && styles.playBtnPlaying,
+        ]}
+        accessibilityElementsHidden
+      >
+        <Text style={[styles.playIcon, isActive && styles.playIconActive]}>
+          {isNowPlaying ? '▶' : '▷'}
         </Text>
       </View>
     </TouchableOpacity>
@@ -195,60 +239,86 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
-    backgroundColor: colors.hero,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  headerGoldRule: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: colors.gold,
+    opacity: 0.5,
   },
   headerArabic: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '700',
     color: colors.heroText,
     textAlign: 'center',
     writingDirection: 'rtl',
     letterSpacing: 1,
-    marginBottom: 4,
+    marginTop: spacing.sm,
+    marginBottom: 2,
   },
   headerLatin: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
     color: colors.heroSubtext,
     textAlign: 'center',
-    letterSpacing: 1.5,
-    marginBottom: 4,
+    letterSpacing: 2,
   },
-  headerSub: {
+  headerDivider: {
+    width: 40,
+    height: 1,
+    backgroundColor: colors.gold,
+    opacity: 0.5,
+    marginVertical: spacing.sm,
+    borderRadius: 1,
+  },
+  headerInstruction: {
     fontSize: 12,
     color: colors.heroMuted,
     textAlign: 'center',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
 
   // List
   listContent: {
+    paddingTop: spacing.xs,
     paddingBottom: spacing.xxl,
+  },
+  emptyFill: {
+    flex: 1,
   },
   separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
-    marginLeft: 72,
+    marginLeft: 72 + spacing.md, // align with info column start
   },
 
   // Empty
-  emptyContainer: {
+  empty: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xxl,
   },
-  emptyText: {
+  emptyIcon: {
+    fontSize: 44,
+    marginBottom: spacing.md,
+  },
+  emptyTitle: {
     fontSize: 17,
     fontWeight: '600',
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
   },
-  emptySubtext: {
+  emptySub: {
     fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
@@ -262,14 +332,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    minHeight: 72,
+    minHeight: 76,
   },
   rowActive: {
     backgroundColor: colors.primaryLight,
   },
 
-  // Number column
-  numCol: {
+  // Number badge
+  badge: {
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -279,20 +349,20 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
     flexShrink: 0,
   },
-  numColActive: {
+  badgeActive: {
     backgroundColor: colors.primary,
   },
-  numText: {
-    fontSize: 14,
+  badgeText: {
+    fontSize: 13,
     fontWeight: '700',
     color: colors.textMuted,
   },
-  numTextActive: {
+  badgeTextActive: {
     color: colors.textInverse,
   },
 
-  // Info column
-  infoCol: {
+  // Info
+  info: {
     flex: 1,
     marginRight: spacing.sm,
   },
@@ -301,59 +371,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     lineHeight: 22,
-    marginBottom: 3,
+    marginBottom: 2,
   },
   titleActive: {
     color: colors.primary,
   },
-  meta: {
+  range: {
     fontSize: 12,
     color: colors.textMuted,
     marginBottom: 4,
   },
-  bottomRow: {
+
+  // Meta row
+  meta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
     flexWrap: 'wrap',
+    gap: 4,
   },
-  duration: {
+  metaText: {
     fontSize: 11,
     color: colors.textMuted,
     fontVariant: ['tabular-nums'],
   },
+  metaDot: {
+    fontSize: 11,
+    color: colors.borderLight,
+  },
+  resumeLabel: {
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  completedLabel: {
+    color: colors.success,
+    fontWeight: '500',
+  },
+
+  // Progress bar
   progressTrack: {
-    flex: 1,
     height: 3,
     borderRadius: 2,
     backgroundColor: colors.borderLight,
     overflow: 'hidden',
-    maxWidth: 100,
+    marginTop: 6,
   },
   progressFill: {
     height: '100%',
     backgroundColor: colors.gold,
     borderRadius: 2,
   },
-  posLabel: {
-    fontSize: 10,
-    color: colors.gold,
-  },
 
-  // Play column
-  playCol: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  // Play button
+  playBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  playColActive: {
+  playBtnActive: {
     borderColor: colors.primary,
+  },
+  playBtnPlaying: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   playIcon: {
     fontSize: 14,
@@ -361,6 +445,6 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   playIconActive: {
-    color: colors.textInverse,
+    color: colors.primary,
   },
 });
