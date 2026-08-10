@@ -1,14 +1,9 @@
 /**
- * Root layout.
+ * Root layout — 3-screen navigation stack.
  *
- * Navigation flow:
- *   index  (IntroScreen  — shows once, replaces to /list)
- *   list   (AudioListScreen — main screen)
- *   reader (ReaderScreen  — PDF + audio, opened with ?audioId=N)
- *
- * The old (tabs)/ group and chapter/hadith routes still exist on disk
- * and can be reached by direct URL, but they are no longer part of the
- * primary user flow and no UI links to them.
+ *   index  → IntroScreen  (shown once on cold launch, auto-navigates to /list)
+ *   list   → AudioListScreen (main screen)
+ *   reader → ReaderScreen (PDF viewer + audio player, opened with ?audioId=N)
  */
 
 import { Stack } from 'expo-router';
@@ -19,7 +14,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, DB_STATUS, useAppContext } from '@/context/AppContext';
 import { AudioProvider } from '@/context/AudioContext';
-import { ReadingProvider } from '@/context/ReadingContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -32,7 +26,7 @@ function AppShell() {
     }
   }, [dbStatus]);
 
-  // While DB is initialising, keep the native splash screen visible.
+  // Keep native splash visible while DB is initialising.
   if (dbStatus === DB_STATUS.IDLE || dbStatus === DB_STATUS.LOADING) {
     return null;
   }
@@ -55,14 +49,11 @@ function AppShell() {
 
   return (
     <AudioProvider>
-      <ReadingProvider>
-        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-          {/* Core 3-screen flow */}
-          <Stack.Screen name="index"  options={{ animation: 'none' }} />
-          <Stack.Screen name="list"   options={{ animation: 'fade' }} />
-          <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom' }} />
-        </Stack>
-      </ReadingProvider>
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+        <Stack.Screen name="index"  options={{ animation: 'none' }} />
+        <Stack.Screen name="list"   options={{ animation: 'fade' }} />
+        <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom' }} />
+      </Stack>
     </AudioProvider>
   );
 }

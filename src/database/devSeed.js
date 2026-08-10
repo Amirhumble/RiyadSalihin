@@ -1,25 +1,21 @@
 /**
- * DEV SEED — development only.
+ * devSeed.js — development-only sample data.
  *
- * Inserts a minimal set of clearly-labelled sample records so screens
- * have something to render during development.  Remove the call in
- * database.js (and this import) before shipping to production.
+ * Inserts minimal placeholder records so screens have something to render
+ * during development. Only runs when the chapters table is empty, and only
+ * when __DEV__ is true (enforced by the call-site in database.js).
  *
- * Rules:
- *  - Only runs when the database is completely empty (no chapters).
- *  - Does NOT invent authentic hadith text.
- *  - 2 sample chapters, 4 sample hadiths, 3 dev audio tracks.
- *  - Audio tracks are linked through hadith_audio.
+ * REMOVE BEFORE SHIPPING TO PRODUCTION:
+ *   1. Delete the `if (__DEV__) { await runDevSeed(_db); }` block in database.js
+ *   2. This file can then be deleted too.
+ *
+ * Note: syncAudioContent() runs after devSeed and will overwrite the [DEV]
+ * audio titles with real titles from audios.js — this is intentional.
  *
  * DEPENDENCY DIRECTION
  * ────────────────────
- * database.js → devSeed.js (correct — one-way)
- *
- * devSeed.js intentionally does NOT import from database.js.
- * The already-open db instance is passed in as a parameter by database.js
- * after initDatabase() completes.  This breaks the circular dependency:
- *   database.js ↔ devSeed.js   ← was a cycle
- *   database.js → devSeed.js   ← correct, cycle-free
+ * database.js → devSeed.js (one-way, no circular dependency)
+ * devSeed.js receives the already-open db instance as a parameter.
  */
 
 /**

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
+import { syncAudioContent } from './audioImporter';
 import { runDevSeed } from './devSeed';
 import { up as migration001 } from './migrations/001_initial';
 import { up as migration002 } from './migrations/002_add_pdf_page';
@@ -65,6 +66,11 @@ export async function initDatabase() {
   if (__DEV__) {
     await runDevSeed(_db);
   }
+
+  // Sync bundled audio metadata into SQLite on every startup.
+  // Idempotent — only updates rows whose metadata has changed.
+  // position_ms (user progress) is never touched.
+  await syncAudioContent(_db);
 }
 
 /**
