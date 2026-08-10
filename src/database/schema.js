@@ -1,18 +1,17 @@
 /**
- * Schema version — increment this when adding a new migration.
- * The migration runner compares this against the version stored in
- * the user_version PRAGMA and only runs missing migrations.
+ * Schema version — increment this when adding a new migration file.
+ * The migration runner compares this against the SQLite user_version PRAGMA
+ * and only applies missing migrations.
  */
 export const SCHEMA_VERSION = 4;
 
-/**
- * SQL statements grouped by table so they are easy to reference
- * when debugging or writing repositories.
- */
+/** Table name constants — avoids magic strings in repository queries. */
 export const TABLES = {
-  CHAPTERS: 'chapters',
-  HADITHS: 'hadiths',
-  AUDIOS: 'audios',
+  AUDIOS:       'audios',
   HADITH_AUDIO: 'hadith_audio',
-  BOOKMARKS: 'bookmarks',
+  // Historical tables created by migration 001. Still present in the DB
+  // schema for data-safety; not actively used by the current 3-screen app.
+  CHAPTERS:     'chapters',
+  HADITHS:      'hadiths',
+  BOOKMARKS:    'bookmarks',
 };

@@ -33,19 +33,10 @@ const colors = {
   borderLight:    '#EEEEEE',
   divider:        '#EBEBEB',
 
-  // ── Chapter row background ─────────────────────────────────────────
-  chapterRow:     '#FFFFFF',
-  chapterRowAlt:  '#F8FAFB',
-
   // ── States ────────────────────────────────────────────────────────
   error:          '#C0392B',
   success:        '#2E7D52',
   warning:        '#E67E22',
-
-  // ── Tab bar ───────────────────────────────────────────────────────
-  tabActive:      '#1B5E7B',
-  tabInactive:    '#999999',
-  tabBackground:  '#FFFFFF',
 };
 
 export default colors;

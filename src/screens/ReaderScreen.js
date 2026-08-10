@@ -6,8 +6,8 @@
  * Flow:
  *   1. Load audio record from SQLite (with chapter info JOIN).
  *   2. Resolve the bundled PDF to a local file:// URI via expo-asset.
- *   3. Pass audio.pdf_page to react-native-pdf's `page` prop so the PDF
- *      opens at the correct page on first render.
+ *   3. After onLoadComplete, call pdfRef.setPage(audio.pdf_page) to navigate
+ *      to the correct page once the PDF is fully loaded.
  *   4. Load audio into the global AudioContext and start playing.
  *   5. Render PDF full-screen with a fixed dark-blue player bar at the bottom.
  *
@@ -30,15 +30,14 @@ import { Asset } from 'expo-asset';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ReadingSettingsPanel from '@/components/ui/ReadingSettingsPanel';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
@@ -84,8 +83,12 @@ export default function ReaderScreen() {
   const [currentPage,  setCurrentPage]  = useState(1);
   const [totalPages,   setTotalPages]   = useState(0);
 
-  // ── Settings ──────────────────────────────────────────────────────
-  const [settingsVisible, setSettingsVisible] = useState(false);
+  // Ref for programmatic page navigation (setPage after onLoadComplete).
+  const pdfRef    = useRef(null);
+  // Keep a ref to audio so handlePdfLoadComplete can read pdf_page without
+  // needing it in the useCallback dependency array (avoids stale closures).
+  const audioRef  = useRef(null);
+  useEffect(() => { audioRef.current = audio; }, [audio]);
 
   // ── Resolve PDF asset once ────────────────────────────────────────
   const resolvePdf = useCallback(async (setCancelled) => {
@@ -129,7 +132,27 @@ export default function ReaderScreen() {
   const handlePdfLoadComplete = useCallback((pages) => {
     setTotalPages(pages);
     setPdfRendering(false);
-  }, []);
+
+    // Navigate to the audio's pdf_page now that we know the real page count.
+    // Clamp to valid range: 1 ≤ target ≤ numberOfPages.
+    const raw    = audioRef.current?.pdf_page;
+    const target = (raw != null && Number.isInteger(raw) && raw >= 1)
+      ? Math.max(1, Math.min(raw, pages))
+      : 1;
+
+    setCurrentPage(target);
+
+    // Only call setPage when we actually need to move away from page 1.
+    // This avoids calling setPage(1) unnecessarily and prevents any
+    // re-render loop.
+    if (target > 1) {
+      // Small delay ensures the PDF renderer is fully initialised before
+      // we programmatically jump pages (avoids a race on some Android versions).
+      setTimeout(() => {
+        pdfRef.current?.setPage(target);
+      }, 100);
+    }
+  }, []); // stable — reads audioRef.current, not audio directly
 
   const handlePdfPageChanged = useCallback((page) => {
     setCurrentPage(page);
@@ -143,11 +166,6 @@ export default function ReaderScreen() {
 
   // ── Derived state ─────────────────────────────────────────────────
   const isLoading = audioLoading || pdfResolving;
-
-  // The initial page is audio.pdf_page (1-based). We pass it directly to
-  // the <Pdf page> prop. react-native-pdf opens at this page on first render.
-  // Once the user scrolls, onPageChanged updates currentPage for the counter.
-  const initialPage = audio?.pdf_page ?? 1;
 
   // ── Render ────────────────────────────────────────────────────────
   return (
@@ -208,14 +226,13 @@ export default function ReaderScreen() {
             }}
           />
         ) : (
-          /* Render PDF only after URI is ready. The `page` prop sets the
-             initial page — react-native-pdf opens there on first render.
-             We do NOT call setCurrentPage in onLoadComplete because that
-             would fight with the controlled `page` prop. */
+          /* Render PDF only after URI is ready.
+             Page navigation happens imperatively via pdfRef.setPage()
+             inside onLoadComplete, once we know the real page count. */
           Pdf && pdfUri ? (
             <Pdf
+              ref={pdfRef}
               source={{ uri: pdfUri, cache: true }}
-              page={initialPage}
               style={styles.pdf}
               onLoadComplete={handlePdfLoadComplete}
               onPageChanged={handlePdfPageChanged}
@@ -250,12 +267,6 @@ export default function ReaderScreen() {
           </View>
         )}
       </View>
-
-      {/* Reading settings */}
-      <ReadingSettingsPanel
-        visible={settingsVisible}
-        onClose={() => setSettingsVisible(false)}
-      />
     </View>
   );
 }
@@ -457,7 +468,7 @@ const styles = StyleSheet.create({
   pdfArea: { flex: 1 },
   pdf: { flex: 1, width: '100%', backgroundColor: colors.backgroundSecondary },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
