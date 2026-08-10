@@ -1,40 +1,27 @@
 /**
- * ReaderScreen — combined PDF viewer + audio player.
+ * ReaderScreen — PDF viewer + audio player.
  *
  * Route: /reader?audioId=<id>
  *
  * Flow:
- *   1. Load audio record from SQLite (with chapter info JOIN).
- *   2. Resolve the bundled PDF to a local file:// URI via expo-asset.
- *   3. After onLoadComplete, call pdfRef.setPage(audio.pdf_page) to navigate
- *      to the correct page once the PDF is fully loaded.
- *   4. Load audio into the global AudioContext and start playing.
- *   5. Render PDF full-screen with a fixed dark-blue player bar at the bottom.
+ *   1. Load audio record from SQLite.
+ *   2. Resolve bundled PDF to a local file:// URI via expo-asset.
+ *   3. After onLoadComplete fires, call pdfRef.setPage(audio.pdf_page).
+ *   4. Load audio into AudioContext and start playing from saved position.
  *
- * PDF PAGE NUMBERING
- * ──────────────────
- * react-native-pdf uses 1-based page numbers (page 1 = first page).
- * The `page` prop controls the *initial* displayed page. After initial
- * render the user can scroll freely; onPageChanged keeps currentPage in sync.
- * audio.pdf_page must therefore be the 1-based page number in the PDF.
- * Example: if the audio starts at physical page 18, set pdf_page = 18.
- *
- * BACK NAVIGATION
- * ───────────────
- * router.back() returns to /list. The intro screen used router.replace()
- * so it is no longer in the stack — back from list would exit the app,
- * which is correct Android behaviour.
+ * The PDF occupies most of the screen. The player bar is fixed at the
+ * bottom and never scrolls away.
  */
 
 import { Asset } from 'expo-asset';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -45,10 +32,10 @@ import { getAudioByIdWithChapterInfo } from '@/database/repositories/audioReposi
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// ── Static PDF module — Metro resolves at build time ─────────────────────────
+// Metro resolves this require at build time.
 const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
 
-// Lazy-load react-native-pdf so a missing native module shows a clean error
+// Lazy-load so a missing native module shows a friendly error instead of crashing.
 let Pdf = null;
 let pdfModuleError = null;
 try {
@@ -58,6 +45,7 @@ try {
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
+
 function fmt(sec) {
   if (!sec || isNaN(sec) || sec < 0) return '0:00';
   const s = Math.floor(sec);
@@ -65,17 +53,18 @@ function fmt(sec) {
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
-export default function ReaderScreen() {
-  const router           = useRouter();
-  const insets           = useSafeAreaInsets();
-  const { audioId }      = useLocalSearchParams();
-  const id               = Number(audioId);
 
-  // ── Data ──────────────────────────────────────────────────────────
+export default function ReaderScreen() {
+  const router      = useRouter();
+  const insets      = useSafeAreaInsets();
+  const { audioId } = useLocalSearchParams();
+  const id          = Number(audioId);
+
+  // Audio record from DB
   const { data: audio, loading: audioLoading, error: audioDbError } =
     useDbQuery(() => getAudioByIdWithChapterInfo(id), [id]);
 
-  // ── PDF state ─────────────────────────────────────────────────────
+  // PDF state
   const [pdfUri,       setPdfUri]       = useState(null);
   const [pdfResolving, setPdfResolving] = useState(true);
   const [pdfRendering, setPdfRendering] = useState(false);
@@ -83,80 +72,65 @@ export default function ReaderScreen() {
   const [currentPage,  setCurrentPage]  = useState(1);
   const [totalPages,   setTotalPages]   = useState(0);
 
-  // Ref for programmatic page navigation (setPage after onLoadComplete).
-  const pdfRef    = useRef(null);
-  // Keep a ref to audio so handlePdfLoadComplete can read pdf_page without
-  // needing it in the useCallback dependency array (avoids stale closures).
-  const audioRef  = useRef(null);
+  // pdfRef for programmatic setPage after load
+  const pdfRef   = useRef(null);
+  // audioRef so onLoadComplete closure can read pdf_page without stale capture
+  const audioRef = useRef(null);
   useEffect(() => { audioRef.current = audio; }, [audio]);
 
-  // ── Resolve PDF asset once ────────────────────────────────────────
-  const resolvePdf = useCallback(async (setCancelled) => {
+  // Resolve PDF asset to a local file:// URI once on mount
+  const resolvePdf = useCallback(async (cancelRef) => {
     try {
       setPdfResolving(true);
       setPdfError(null);
       const asset = Asset.fromModule(PDF_MODULE);
       await asset.downloadAsync();
-      if (setCancelled?.current) return;
-      if (!asset.localUri) throw new Error('PDF file could not be prepared.');
+      if (cancelRef?.current) return;
+      if (!asset.localUri) throw new Error('PDF could not be prepared.');
       setPdfUri(asset.localUri);
       setPdfRendering(true);
     } catch (err) {
       console.error('[ReaderScreen] PDF asset error:', err);
-      if (!setCancelled?.current) setPdfError(err);
+      if (!cancelRef?.current) setPdfError(err);
     } finally {
-      if (!setCancelled?.current) setPdfResolving(false);
+      if (!cancelRef?.current) setPdfResolving(false);
     }
   }, []);
 
   useEffect(() => {
     if (pdfModuleError) { setPdfResolving(false); return; }
-    const cancelledRef = { current: false };
-    resolvePdf(cancelledRef);
-    return () => { cancelledRef.current = true; };
+    const cancelRef = { current: false };
+    resolvePdf(cancelRef);
+    return () => { cancelRef.current = true; };
   }, [resolvePdf]);
 
-  // ── Load audio once when the DB record is ready ───────────────────
-  const { loadAudio } = useAudio();
-  const audioLoadedRef = useRef(false);
+  // Load audio once when the DB record arrives
+  const { loadAudio }    = useAudio();
+  const audioLoadedRef   = useRef(false);
 
   useEffect(() => {
-    // Guard: only load once per screen mount, and only when audio is loaded
     if (!audio || audioLoadedRef.current) return;
     audioLoadedRef.current = true;
-    // Resume from saved position if available
     loadAudio(audio, audio.position_ms ?? 0);
   }, [audio, loadAudio]);
 
-  // ── PDF callbacks ─────────────────────────────────────────────────
+  // PDF callbacks
   const handlePdfLoadComplete = useCallback((pages) => {
     setTotalPages(pages);
     setPdfRendering(false);
 
-    // Navigate to the audio's pdf_page now that we know the real page count.
-    // Clamp to valid range: 1 ≤ target ≤ numberOfPages.
     const raw    = audioRef.current?.pdf_page;
     const target = (raw != null && Number.isInteger(raw) && raw >= 1)
       ? Math.max(1, Math.min(raw, pages))
       : 1;
 
     setCurrentPage(target);
-
-    // Only call setPage when we actually need to move away from page 1.
-    // This avoids calling setPage(1) unnecessarily and prevents any
-    // re-render loop.
     if (target > 1) {
-      // Small delay ensures the PDF renderer is fully initialised before
-      // we programmatically jump pages (avoids a race on some Android versions).
-      setTimeout(() => {
-        pdfRef.current?.setPage(target);
-      }, 100);
+      setTimeout(() => pdfRef.current?.setPage(target), 100);
     }
-  }, []); // stable — reads audioRef.current, not audio directly
-
-  const handlePdfPageChanged = useCallback((page) => {
-    setCurrentPage(page);
   }, []);
+
+  const handlePdfPageChanged = useCallback((page) => setCurrentPage(page), []);
 
   const handlePdfError = useCallback((err) => {
     console.error('[ReaderScreen] PDF render error:', err);
@@ -164,47 +138,56 @@ export default function ReaderScreen() {
     setPdfRendering(false);
   }, []);
 
-  // ── Derived state ─────────────────────────────────────────────────
   const isLoading = audioLoading || pdfResolving;
 
   // ── Render ────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
-      {/* ── Header ──────────────────────────────────────────────── */}
+
+      {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
+          {/* Back */}
           <TouchableOpacity
-            style={styles.headerSide}
+            style={styles.headerBack}
             onPress={() => router.back()}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityLabel="Go back"
+            hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+            accessibilityLabel="Go back to lessons"
             accessibilityRole="button"
           >
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
 
-          <View style={styles.headerCentre}>
+          {/* Title */}
+          <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {audio?.title ?? 'Loading…'}
             </Text>
             {audio ? (
               <Text style={styles.headerSub} numberOfLines={1}>
-                {formatHadithRange(audio.hadith_number_from, audio.hadith_number_to) ?? ''}
+                {formatHadithRange(
+                  audio.hadith_number_from,
+                  audio.hadith_number_to
+                ) ?? ''}
               </Text>
             ) : null}
           </View>
 
-          <View style={styles.headerSide}>
-            {totalPages > 0 && (
+          {/* Page counter */}
+          <View style={styles.headerRight}>
+            {totalPages > 0 ? (
               <Text style={styles.pageCounter}>
-                {currentPage}/{totalPages}
+                {currentPage} / {totalPages}
               </Text>
+            ) : (
+              // keeps header balanced when counter is absent
+              <View style={styles.headerRight} />
             )}
           </View>
         </View>
       </SafeAreaView>
 
-      {/* ── PDF area ─────────────────────────────────────────────── */}
+      {/* PDF area */}
       <View style={styles.pdfArea}>
         {/* Loading overlay */}
         {(isLoading || pdfRendering) && !pdfError && (
@@ -216,7 +199,6 @@ export default function ReaderScreen() {
           </View>
         )}
 
-        {/* PDF error */}
         {pdfError ? (
           <PdfErrorView
             error={pdfError}
@@ -225,28 +207,23 @@ export default function ReaderScreen() {
               resolvePdf({ current: false });
             }}
           />
-        ) : (
-          /* Render PDF only after URI is ready.
-             Page navigation happens imperatively via pdfRef.setPage()
-             inside onLoadComplete, once we know the real page count. */
-          Pdf && pdfUri ? (
-            <Pdf
-              ref={pdfRef}
-              source={{ uri: pdfUri, cache: true }}
-              style={styles.pdf}
-              onLoadComplete={handlePdfLoadComplete}
-              onPageChanged={handlePdfPageChanged}
-              onError={handlePdfError}
-              enablePaging={false}
-              horizontal={false}
-              enableAnnotationRendering={false}
-              trustAllCerts={false}
-            />
-          ) : null
-        )}
+        ) : Pdf && pdfUri ? (
+          <Pdf
+            ref={pdfRef}
+            source={{ uri: pdfUri, cache: true }}
+            style={styles.pdf}
+            onLoadComplete={handlePdfLoadComplete}
+            onPageChanged={handlePdfPageChanged}
+            onError={handlePdfError}
+            enablePaging={false}
+            horizontal={false}
+            enableAnnotationRendering={false}
+            trustAllCerts={false}
+          />
+        ) : null}
       </View>
 
-      {/* ── Fixed audio player ────────────────────────────────────── */}
+      {/* Fixed audio player */}
       <View
         style={[
           styles.playerBar,
@@ -254,15 +231,15 @@ export default function ReaderScreen() {
         ]}
       >
         {audioDbError ? (
-          <View style={styles.playerRow}>
-            <Text style={styles.playerErrorText}>
-              This audio is currently unavailable.
+          <View style={styles.playerMessage}>
+            <Text style={styles.playerMessageText}>
+              Audio is currently unavailable.
             </Text>
           </View>
         ) : audio ? (
           <PlayerBar audio={audio} />
         ) : (
-          <View style={styles.playerRow}>
+          <View style={styles.playerMessage}>
             <ActivityIndicator color={colors.heroSubtext} size="small" />
           </View>
         )}
@@ -291,9 +268,9 @@ function PlayerBar({ audio }) {
 
   const handlePlayPause = useCallback(() => {
     clearAudioError();
-    if (!isThis) loadAudio(audio, audio.position_ms ?? 0);
-    else if (playing) pause();
-    else play();
+    if (!isThis)       loadAudio(audio, audio.position_ms ?? 0);
+    else if (playing)  pause();
+    else               play();
   }, [isThis, playing, audio, loadAudio, play, pause, clearAudioError]);
 
   const handleSeek = useCallback((e) => {
@@ -306,18 +283,16 @@ function PlayerBar({ audio }) {
     seek(Math.max(0, Math.min(time + delta, dur)));
   }, [isThis, time, dur, seek]);
 
-  // User-friendly audio error (never expose raw messages)
-  const showError = isThis && audioError;
-
   return (
     <View style={pl.container}>
-      {showError && (
+      {/* Audio error */}
+      {isThis && audioError && (
         <Text style={pl.errorText} numberOfLines={1}>
           Audio is currently unavailable. Please try again.
         </Text>
       )}
 
-      {/* Skip –10 / Play-Pause / Skip +10 */}
+      {/* Controls: –10 / Play-Pause / +10 */}
       <View style={pl.controls}>
         <TouchableOpacity
           style={pl.skipBtn}
@@ -325,9 +300,9 @@ function PlayerBar({ audio }) {
           activeOpacity={0.7}
           accessibilityLabel="Rewind 10 seconds"
           accessibilityRole="button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={pl.skipArrow}>↺</Text>
+          <Text style={pl.skipIcon}>↺</Text>
           <Text style={pl.skipLabel}>10</Text>
         </TouchableOpacity>
 
@@ -335,7 +310,7 @@ function PlayerBar({ audio }) {
           style={pl.playBtn}
           onPress={handlePlayPause}
           activeOpacity={0.8}
-          accessibilityLabel={playing ? 'Pause' : 'Play'}
+          accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}
           accessibilityRole="button"
           accessibilityState={{ busy: buffering }}
         >
@@ -349,27 +324,28 @@ function PlayerBar({ audio }) {
           style={pl.skipBtn}
           onPress={() => skip(10)}
           activeOpacity={0.7}
-          accessibilityLabel="Skip 10 seconds"
+          accessibilityLabel="Skip forward 10 seconds"
           accessibilityRole="button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Text style={pl.skipLabel}>10</Text>
-          <Text style={pl.skipArrow}>↻</Text>
+          <Text style={pl.skipIcon}>↻</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Progress track */}
+      {/* Progress bar + times */}
       <View style={pl.progressWrap}>
         <View
           style={pl.track}
           onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
         >
+          {/* Large invisible touch target over the track */}
           <TouchableOpacity
-            style={StyleSheet.absoluteFill}
+            style={pl.trackTouchTarget}
             onPress={handleSeek}
             activeOpacity={1}
             accessibilityRole="adjustable"
-            accessibilityLabel="Audio position"
+            accessibilityLabel="Seek audio position"
             accessibilityValue={{
               now: Math.round(time),
               min: 0,
@@ -388,7 +364,7 @@ function PlayerBar({ audio }) {
         </View>
       </View>
 
-      {/* DEV info — never shown in production */}
+      {/* DEV — never shown in production builds */}
       {__DEV__ && isThis && (
         <Text style={pl.devText} numberOfLines={1}>
           {`DEV  ${audio?.filename ?? '—'}  ${playing ? '▶' : '⏸'}  ${fmt(time)} / ${fmt(dur)}`}
@@ -401,14 +377,17 @@ function PlayerBar({ audio }) {
 // ── PdfErrorView ──────────────────────────────────────────────────────────────
 
 function PdfErrorView({ error, onRetry }) {
-  const msg = error?.message ?? '';
-  const isNative = msg.includes('NativeModule') || msg.includes('RNPDFPdf') || msg.includes('cannot be null');
+  const msg      = error?.message ?? '';
+  const isNative =
+    msg.includes('NativeModule') ||
+    msg.includes('RNPDFPdf') ||
+    msg.includes('cannot be null');
 
   return (
     <View style={styles.pdfError}>
       <Text style={styles.pdfErrorIcon}>📄</Text>
       <Text style={styles.pdfErrorTitle}>
-        {isNative ? 'PDF viewer is not available' : 'Could not open the PDF'}
+        {isNative ? 'PDF viewer is not available' : 'Could not open the book'}
       </Text>
       <Text style={styles.pdfErrorBody}>
         {isNative
@@ -416,8 +395,13 @@ function PdfErrorView({ error, onRetry }) {
           : 'The file could not be read. Please try again.'}
       </Text>
       {!isNative && onRetry && (
-        <TouchableOpacity style={styles.pdfRetryBtn} onPress={onRetry} activeOpacity={0.8}
-          accessibilityLabel="Try again" accessibilityRole="button">
+        <TouchableOpacity
+          style={styles.pdfRetryBtn}
+          onPress={onRetry}
+          activeOpacity={0.8}
+          accessibilityLabel="Try again"
+          accessibilityRole="button"
+        >
           <Text style={styles.pdfRetryText}>Try again</Text>
         </TouchableOpacity>
       )}
@@ -435,17 +419,27 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 10,
-    minHeight: 52,
+    minHeight: 54,
   },
-  headerSide: {
-    width: 56,
-    alignItems: 'flex-start',
+  headerBack: {
+    width: 48,
+    alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 44,
   },
-  backArrow: { fontSize: 30, color: colors.heroText, lineHeight: 34, marginTop: -2 },
-  headerCentre: { flex: 1, alignItems: 'center' },
+  backArrow: {
+    fontSize: 32,
+    color: colors.heroText,
+    lineHeight: 36,
+    marginTop: -2,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
+  },
   headerTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -458,10 +452,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
   },
+  headerRight: {
+    width: 56,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
   pageCounter: {
     fontSize: 11,
     color: colors.heroSubtext,
-    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
   },
 
   // PDF
@@ -474,7 +473,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  loadingText: { fontSize: 14, color: colors.textMuted, marginTop: spacing.sm },
+  loadingText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+  },
 
   // PDF error
   pdfError: {
@@ -484,7 +487,7 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     backgroundColor: colors.background,
   },
-  pdfErrorIcon: { fontSize: 40, marginBottom: spacing.md },
+  pdfErrorIcon:  { fontSize: 40, marginBottom: spacing.md },
   pdfErrorTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -507,19 +510,19 @@ const styles = StyleSheet.create({
   },
   pdfRetryText: { color: colors.textInverse, fontSize: 15, fontWeight: '600' },
 
-  // Player bar container
+  // Player bar wrapper
   playerBar: {
     backgroundColor: colors.hero,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
   },
-  playerRow: {
-    paddingVertical: spacing.sm,
+  playerMessage: {
+    paddingVertical: spacing.sm + 2,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 44,
   },
-  playerErrorText: {
+  playerMessageText: {
     fontSize: 13,
     color: colors.heroSubtext,
     textAlign: 'center',
@@ -536,7 +539,7 @@ const pl = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
-  // Controls
+  // Controls row
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -544,6 +547,8 @@ const pl = StyleSheet.create({
     gap: spacing.xl,
     marginBottom: spacing.md,
   },
+
+  // Skip buttons
   skipBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -552,20 +557,29 @@ const pl = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  skipArrow: { fontSize: 20, color: colors.heroSubtext },
-  skipLabel: { fontSize: 12, color: colors.heroSubtext, fontVariant: ['tabular-nums'] },
+  skipIcon:  { fontSize: 20, color: colors.heroSubtext },
+  skipLabel: {
+    fontSize: 12,
+    color: colors.heroSubtext,
+    fontVariant: ['tabular-nums'],
+  },
 
+  // Main play/pause button — deliberately large and prominent
   playBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playIcon: { fontSize: 26, color: colors.heroText, marginLeft: 3 },
+  playIcon: {
+    fontSize: 28,
+    color: colors.heroText,
+    marginLeft: 3,
+  },
 
   // Progress
   progressWrap: { gap: spacing.xs },
@@ -575,6 +589,12 @@ const pl = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.22)',
     overflow: 'visible',
     position: 'relative',
+  },
+  // Invisible tall touch target over the track for easy tapping
+  trackTouchTarget: {
+    ...StyleSheet.absoluteFillObject,
+    top: -12,
+    bottom: -12,
   },
   fill: {
     position: 'absolute',
@@ -590,15 +610,23 @@ const pl = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.gold,
     marginLeft: -8,
+    elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 2,
-    elevation: 3,
   },
-  times: { flexDirection: 'row', justifyContent: 'space-between' },
-  timeText: { fontSize: 11, color: colors.heroSubtext, fontVariant: ['tabular-nums'] },
+  times: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  timeText: {
+    fontSize: 11,
+    color: colors.heroSubtext,
+    fontVariant: ['tabular-nums'],
+  },
 
+  // DEV only
   devText: {
     fontSize: 9,
     color: colors.heroMuted,

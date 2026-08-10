@@ -1,13 +1,8 @@
 /**
- * IntroScreen — book identity / cover screen.
+ * IntroScreen — branded cover screen shown once on cold launch.
  *
- * Shown once on cold launch, then automatically navigates to /list.
- * The user never returns to this screen through normal navigation.
- *
- * Visual design:
- *   Full-screen dark Islamic blue. Arabic title large and centred.
- *   Amharic subtitle. Author line. Decorative shapes from RN primitives.
- *   No buttons, no statistics, no technical content.
+ * Automatically navigates to /list after INTRO_DURATION_MS.
+ * router.replace() is used so back never returns here.
  */
 
 import { useRouter } from 'expo-router';
@@ -21,14 +16,11 @@ import spacing from '@/constants/spacing';
 const INTRO_DURATION_MS = 2600;
 
 export default function IntroScreen() {
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      // replace so pressing "back" from the list never returns here
-      router.replace('/list');
-    }, INTRO_DURATION_MS);
+    const timer = setTimeout(() => router.replace('/list'), INTRO_DURATION_MS);
     return () => clearTimeout(timer);
   }, [router]);
 
@@ -36,36 +28,28 @@ export default function IntroScreen() {
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
-      {/* Decorative corner arcs — built from RN shapes, no images */}
-      <View style={styles.arcTopRight} pointerEvents="none" />
-      <View style={styles.arcTopRightInner} pointerEvents="none" />
-      <View style={styles.arcBottomLeft} pointerEvents="none" />
+      {/* Subtle corner rings — pure RN shapes, no images */}
+      <View style={styles.ringTopRight} pointerEvents="none" />
+      <View style={styles.ringTopRightSmall} pointerEvents="none" />
+      <View style={styles.ringBottomLeft} pointerEvents="none" />
 
-      {/* Gold top rule */}
+      {/* Gold top & bottom rules */}
       <View style={styles.goldRuleTop} pointerEvents="none" />
+      <View style={styles.goldRuleBottom} pointerEvents="none" />
 
       {/* Centre content */}
       <View style={styles.content}>
-        {/* Arabic title */}
         <Text style={styles.arabicTitle}>رياض الصالحين</Text>
 
-        {/* Gold divider */}
         <View style={styles.goldDivider} />
 
-        {/* Amharic / transliterated title */}
-        <Text style={styles.amharicTitle}>Riyad as-Salihin</Text>
-
-        {/* Subtitle */}
+        <Text style={styles.latinTitle}>Riyad as-Salihin</Text>
         <Text style={styles.subtitle}>Gardens of the Righteous</Text>
 
-        {/* Author */}
         <Text style={styles.author}>
           Imam Yahya ibn Sharaf al-Nawawi
         </Text>
       </View>
-
-      {/* Gold bottom rule */}
-      <View style={styles.goldRuleBottom} pointerEvents="none" />
     </View>
   );
 }
@@ -79,37 +63,39 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
-  // ── Decorative shapes ──────────────────────────────────────────────
-  arcTopRight: {
+  // Decorative rings
+  ringTopRight: {
     position: 'absolute',
-    top: -140,
-    right: -140,
-    width: 320,
-    height: 320,
-    borderRadius: 160,
+    top: -130,
+    right: -130,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  arcTopRightInner: {
+  ringTopRightSmall: {
     position: 'absolute',
-    top: -70,
-    right: -70,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+    top: -60,
+    right: -60,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  arcBottomLeft: {
+  ringBottomLeft: {
     position: 'absolute',
-    bottom: -100,
-    left: -100,
-    width: 240,
-    height: 240,
-    borderRadius: 120,
+    bottom: -90,
+    left: -90,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
+
+  // Gold rules
   goldRuleTop: {
     position: 'absolute',
     top: 0,
@@ -117,7 +103,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: 3,
     backgroundColor: colors.gold,
-    opacity: 0.55,
+    opacity: 0.6,
   },
   goldRuleBottom: {
     position: 'absolute',
@@ -126,50 +112,47 @@ const styles = StyleSheet.create({
     right: 0,
     height: 3,
     backgroundColor: colors.gold,
-    opacity: 0.55,
+    opacity: 0.6,
   },
 
-  // ── Text content ───────────────────────────────────────────────────
+  // Content
   content: {
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
   },
-
   arabicTitle: {
-    fontSize: 52,
+    fontSize: 54,
     fontWeight: '700',
     color: colors.heroText,
     textAlign: 'center',
     writingDirection: 'rtl',
-    letterSpacing: 1.5,
+    letterSpacing: 2,
     marginBottom: spacing.lg,
+    lineHeight: 68,
   },
-
   goldDivider: {
-    width: 72,
+    width: 64,
     height: 2,
     backgroundColor: colors.gold,
     borderRadius: 1,
     marginBottom: spacing.lg,
+    opacity: 0.85,
   },
-
-  amharicTitle: {
-    fontSize: 26,
+  latinTitle: {
+    fontSize: 22,
     fontWeight: '600',
     color: colors.heroText,
     textAlign: 'center',
-    letterSpacing: 2,
-    marginBottom: spacing.sm,
+    letterSpacing: 2.5,
+    marginBottom: spacing.xs,
   },
-
   subtitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: colors.heroSubtext,
     textAlign: 'center',
     letterSpacing: 0.5,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl + spacing.sm,
   },
-
   author: {
     fontSize: 13,
     color: colors.heroMuted,
