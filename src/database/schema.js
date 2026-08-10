@@ -3,7 +3,7 @@
  * The migration runner compares this against the version stored in
  * the user_version PRAGMA and only runs missing migrations.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * SQL statements grouped by table so they are easy to reference
