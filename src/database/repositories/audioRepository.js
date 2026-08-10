@@ -1,31 +1,44 @@
 import { getDatabase } from '../database';
 
 /**
- * Returns all audio tracks ordered for display, joined with chapter info.
- * Used by the AudioListScreen to show chapter/hadith context per track.
+ * Returns all audio tracks ordered for display.
+ * The returned rows include the chapter range (chapter_from, chapter_to)
+ * directly from the audios table — no JOIN needed for the range itself.
  * @returns {Promise<Array>}
  */
 export async function getAllAudiosWithChapterInfo() {
   const db = getDatabase();
+  // chapter_from and chapter_to are already on the audios row.
+  // No chapter table JOIN is required for the range display.
   return db.getAllAsync(
-    `SELECT a.*,
-            c.arabic_title  AS chapter_arabic_title,
-            c.english_title AS chapter_english_title,
-            c.chapter_number AS chapter_number_val
+    `SELECT a.*
        FROM audios a
-       LEFT JOIN chapters c ON c.id = a.chapter_id
       ORDER BY a.ordering ASC, a.id ASC;`
   );
 }
 
 /**
- * Returns all audio tracks ordered for display.
+ * Returns all audio tracks ordered for display (no extra joins).
  * @returns {Promise<Array>}
  */
 export async function getAllAudios() {
   const db = getDatabase();
   return db.getAllAsync(
     'SELECT * FROM audios ORDER BY ordering ASC, id ASC;'
+  );
+}
+
+/**
+ * Returns a single audio track by its primary key including chapter range.
+ * Used by ReaderScreen.
+ * @param {number} id
+ * @returns {Promise<Object|null>}
+ */
+export async function getAudioByIdWithChapterInfo(id) {
+  const db = getDatabase();
+  return db.getFirstAsync(
+    'SELECT * FROM audios WHERE id = ?;',
+    [id]
   );
 }
 
@@ -43,28 +56,19 @@ export async function getAudioById(id) {
 }
 
 /**
- * Returns all audio tracks for a given chapter.
- * Matches both via the direct chapter_id column on audios AND via hadiths
- * that belong to the chapter (through hadith_audio), returning a deduplicated
- * result set.
- *
- * @param {number} chapterId
+ * Returns all audio tracks whose chapter range overlaps with a given chapter number.
+ * An audio overlaps if chapter_from <= chapterNumber <= chapter_to.
+ * @param {number} chapterNumber  — the chapter_number value (not the DB id)
  * @returns {Promise<Array>}
  */
-export async function getAudiosByChapter(chapterId) {
+export async function getAudiosByChapterNumber(chapterNumber) {
   const db = getDatabase();
   return db.getAllAsync(
-    `SELECT DISTINCT a.*
+    `SELECT a.*
        FROM audios a
-      WHERE a.chapter_id = ?
-      UNION
-     SELECT DISTINCT a.*
-       FROM audios a
-       JOIN hadith_audio ha ON ha.audio_id = a.id
-       JOIN hadiths       h  ON h.id = ha.hadith_id
-      WHERE h.chapter_id = ?
-      ORDER BY ordering ASC, id ASC;`,
-    [chapterId, chapterId]
+      WHERE a.chapter_from <= ? AND a.chapter_to >= ?
+      ORDER BY a.ordering ASC, a.id ASC;`,
+    [chapterNumber, chapterNumber]
   );
 }
 

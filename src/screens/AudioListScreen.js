@@ -138,15 +138,13 @@ function AudioRow({ audio, onPress }) {
           {audio.title}
         </Text>
 
-        {/* Chapter context */}
-        {audio.chapter_english_title ? (
-          <Text style={styles.meta} numberOfLines={1}>
-            {audio.chapter_number_val
-              ? `Chapter ${audio.chapter_number_val}  ·  `
-              : ''}
-            {audio.chapter_english_title}
-          </Text>
-        ) : null}
+        {/* Chapter range */}
+        {(() => {
+          const label = formatChapterRange(audio.chapter_from, audio.chapter_to);
+          return label ? (
+            <Text style={styles.meta} numberOfLines={1}>{label}</Text>
+          ) : null;
+        })()}
 
         {/* Duration + progress */}
         <View style={styles.bottomRow}>
