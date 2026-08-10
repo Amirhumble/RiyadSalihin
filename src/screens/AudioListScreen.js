@@ -27,6 +27,7 @@ import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
 import { getAllAudiosWithChapterInfo } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import { formatHadithRange } from '@/utils/formatHadithRange';
 
 // Format milliseconds → "m:ss" or null
 function formatDuration(ms) {
@@ -138,9 +139,9 @@ function AudioRow({ audio, onPress }) {
           {audio.title}
         </Text>
 
-        {/* Chapter range */}
+        {/* Hadith range / Introduction */}
         {(() => {
-          const label = formatChapterRange(audio.chapter_from, audio.chapter_to);
+          const label = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
           return label ? (
             <Text style={styles.meta} numberOfLines={1}>{label}</Text>
           ) : null;

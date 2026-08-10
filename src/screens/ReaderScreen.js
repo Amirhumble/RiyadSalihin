@@ -44,6 +44,7 @@ import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
 import { getAudioByIdWithChapterInfo } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import { formatHadithRange } from '@/utils/formatHadithRange';
 
 // ── Static PDF module — Metro resolves at build time ─────────────────────────
 const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
@@ -170,7 +171,7 @@ export default function ReaderScreen() {
             </Text>
             {audio ? (
               <Text style={styles.headerSub} numberOfLines={1}>
-                {formatChapterRange(audio.chapter_from, audio.chapter_to) ?? ''}
+                {formatHadithRange(audio.hadith_number_from, audio.hadith_number_to) ?? ''}
               </Text>
             ) : null}
           </View>

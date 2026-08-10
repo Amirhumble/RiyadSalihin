@@ -1,32 +1,34 @@
 /**
  * audioImporter.js
  *
- * Imports audio metadata and hadith-audio relationships into the SQLite database.
+ * Imports audio metadata and hadith-audio link records into SQLite.
  *
  * DESIGN PRINCIPLES
  * ─────────────────
- * 1. Validate first, insert second.
- * 2. Idempotent — existing rows (keyed by filename) are skipped, never overwritten.
- *    position_ms (user playback progress) is always preserved.
+ * 1. Validate first, insert second — all checks run before any SQL write.
+ * 2. Idempotent — existing audio rows (keyed by filename) are skipped;
+ *    position_ms (user playback progress) is NEVER overwritten.
  * 3. All-or-nothing transaction — any failure rolls back completely.
  * 4. Does not touch chapters, hadiths, or bookmarks.
- * 5. Does not perform Metro require() calls.
+ * 5. Does not perform Metro require() calls (that is audioAssets.js).
  * 6. Not called automatically at app startup.
  *
- * CHAPTER RANGE
- * ─────────────
- * Each audio record now stores a chapter range instead of a single chapter_id:
- *   chapter_from : number | null — first chapter number covered
- *   chapter_to   : number | null — last chapter number covered
- * Both must be null or both must be set.  chapter_from <= chapter_to.
- * Every chapter number in [chapter_from, chapter_to] must exist in the DB.
+ * HADITH RANGE
+ * ────────────
+ * Each audio record stores a global hadith number range:
+ *   hadith_number_from : number  — first global hadith covered (0 = introduction)
+ *   hadith_number_to   : number  — last  global hadith covered (0 = introduction)
+ * Both must be provided (they are always integers, never null in valid data).
+ * 0/0 is the special "Introduction" case — always valid.
+ * For normal hadiths: 1 ≤ from ≤ to.
+ * Numbers are global across the book — NOT chapter-relative.
+ * The importer does NOT validate ranges against chapters.
  *
  * USAGE
  * ─────
  *   import { importAudioContent } from '@/database/audioImporter';
  *   import audios     from '@/database/content/audios';
  *   import audioLinks from '@/database/content/audioLinks';
- *
  *   const result = await importAudioContent({ audios, audioLinks });
  *   // { audiosInserted: 3, audiosSkipped: 0, linksInserted: 3, linksSkipped: 0 }
  */
@@ -34,6 +36,47 @@
 import { getDatabase } from './database';
 
 // ─── Validation ───────────────────────────────────────────────────────────────
+
+/**
+ * Validates a single audio record's hadith range.
+ * Throws with a clear message on any violation.
+ *
+ * Rules:
+ *  - Both values must be non-negative integers.
+ *  - 0/0 = Introduction — always valid.
+ *  - Otherwise: from >= 1, to >= 1, from <= to.
+ *  - One cannot be 0 while the other is non-zero.
+ */
+function validateHadithRange(from, to, pos, fname) {
+  if (!Number.isInteger(from) || from < 0) {
+    throw new Error(
+      `${pos} ("${fname}"): "hadith_number_from" must be a non-negative integer, ` +
+      `got ${JSON.stringify(from)}.`
+    );
+  }
+  if (!Number.isInteger(to) || to < 0) {
+    throw new Error(
+      `${pos} ("${fname}"): "hadith_number_to" must be a non-negative integer, ` +
+      `got ${JSON.stringify(to)}.`
+    );
+  }
+  // Introduction case
+  if (from === 0 && to === 0) return;
+  // One is 0 but the other is not
+  if (from === 0 || to === 0) {
+    throw new Error(
+      `${pos} ("${fname}"): 0 is only valid when BOTH hadith_number_from and ` +
+      `hadith_number_to are 0 (Introduction). Got from=${from}, to=${to}.`
+    );
+  }
+  // Normal range
+  if (from > to) {
+    throw new Error(
+      `${pos} ("${fname}"): "hadith_number_from" (${from}) must not be ` +
+      `greater than "hadith_number_to" (${to}).`
+    );
+  }
+}
 
 /**
  * Validates the audio metadata array.
@@ -69,35 +112,14 @@ function validateAudios(audios) {
       throw new Error(`${pos} ("${fname}"): missing or empty "title".`);
     }
 
-    // chapter_from / chapter_to — both null OR both set
-    const hasFrom = a.chapter_from != null;
-    const hasTo   = a.chapter_to   != null;
-    if (hasFrom !== hasTo) {
-      throw new Error(
-        `${pos} ("${fname}"): "chapter_from" and "chapter_to" must both be ` +
-        'provided or both be null.'
-      );
+    // hadith_number_from / hadith_number_to
+    if (a.hadith_number_from == null) {
+      throw new Error(`${pos} ("${fname}"): missing required field "hadith_number_from".`);
     }
-    if (hasFrom) {
-      if (!Number.isInteger(a.chapter_from) || a.chapter_from < 1) {
-        throw new Error(
-          `${pos} ("${fname}"): "chapter_from" must be a positive integer, ` +
-          `got ${JSON.stringify(a.chapter_from)}.`
-        );
-      }
-      if (!Number.isInteger(a.chapter_to) || a.chapter_to < 1) {
-        throw new Error(
-          `${pos} ("${fname}"): "chapter_to" must be a positive integer, ` +
-          `got ${JSON.stringify(a.chapter_to)}.`
-        );
-      }
-      if (a.chapter_from > a.chapter_to) {
-        throw new Error(
-          `${pos} ("${fname}"): "chapter_from" (${a.chapter_from}) must not be ` +
-          `greater than "chapter_to" (${a.chapter_to}).`
-        );
-      }
+    if (a.hadith_number_to == null) {
+      throw new Error(`${pos} ("${fname}"): missing required field "hadith_number_to".`);
     }
+    validateHadithRange(a.hadith_number_from, a.hadith_number_to, pos, fname);
 
     // ordering
     if (a.ordering == null) {
@@ -112,7 +134,7 @@ function validateAudios(audios) {
 }
 
 /**
- * Validates the audio-link array (structural checks only — no DB calls).
+ * Validates the audio-link array (structural only — no DB calls).
  * @param {Array} audioLinks
  * @param {Set}   filenameSet
  * @throws {Error} on first invalid record.
@@ -138,14 +160,14 @@ function validateAudioLinks(audioLinks, filenameSet) {
     const fname = link.filename.trim();
     if (!filenameSet.has(fname)) {
       throw new Error(
-        `${pos}: filename "${fname}" is not present in the audios array. ` +
+        `${pos}: filename "${fname}" is not in the audios array. ` +
         'Add a matching entry to audios.js first.'
       );
     }
 
-    // chapter_number (in audioLinks this is still a single chapter reference)
+    // chapter_number (audioLinks still identify hadith by chapter+number)
     if (link.chapter_number == null) {
-      throw new Error(`${pos} ("${fname}"): missing required field "chapter_number".`);
+      throw new Error(`${pos} ("${fname}"): missing "chapter_number".`);
     }
     if (!Number.isInteger(link.chapter_number) || link.chapter_number < 1) {
       throw new Error(
@@ -157,8 +179,7 @@ function validateAudioLinks(audioLinks, filenameSet) {
     // hadith_number
     if (link.hadith_number == null || String(link.hadith_number).trim() === '') {
       throw new Error(
-        `${pos} ("${fname}", chapter ${link.chapter_number}): ` +
-        'missing or empty "hadith_number".'
+        `${pos} ("${fname}", chapter ${link.chapter_number}): missing "hadith_number".`
       );
     }
 
@@ -180,10 +201,9 @@ function validateAudioLinks(audioLinks, filenameSet) {
  *
  * @param {{ audios: Array, audioLinks: Array }} content
  * @returns {Promise<{ audiosInserted, audiosSkipped, linksInserted, linksSkipped }>}
- * @throws {Error} if validation fails or a database error occurs.
+ * @throws {Error} on validation failure or database error (auto-rollback).
  */
 export async function importAudioContent({ audios, audioLinks }) {
-  // 1. Structural validation (no DB calls)
   validateAudios(audios);
   const filenameSet = new Set(audios.map((a) => a.filename.trim()));
   validateAudioLinks(audioLinks, filenameSet);
@@ -194,72 +214,47 @@ export async function importAudioContent({ audios, audioLinks }) {
   }
 
   const db = getDatabase();
-
-  let audiosInserted = 0;
-  let audiosSkipped  = 0;
-  let linksInserted  = 0;
-  let linksSkipped   = 0;
+  let audiosInserted = 0, audiosSkipped = 0, linksInserted = 0, linksSkipped = 0;
 
   await db.withTransactionAsync(async () => {
 
-    // ── A. Verify all chapter numbers referenced actually exist ──────────
-    const allChapterNumbers = new Set();
-    for (const a of audios) {
-      if (a.chapter_from != null) {
-        // Verify every chapter in the range [chapter_from, chapter_to]
-        for (let n = a.chapter_from; n <= a.chapter_to; n++) {
-          allChapterNumbers.add(n);
-        }
-      }
-    }
-    for (const link of audioLinks) {
-      allChapterNumbers.add(link.chapter_number);
-    }
-
-    for (const chNum of allChapterNumbers) {
-      const row = await db.getFirstAsync(
-        'SELECT id FROM chapters WHERE chapter_number = ?;',
-        [chNum]
-      );
-      if (!row) {
-        throw new Error(
-          `[AudioImporter] Chapter ${chNum} does not exist in the database. ` +
-          'Import chapters first using contentImporter.js.'
-        );
-      }
-    }
-
-    // ── B. Resolve chapter_number → chapter_id map for audioLinks ────────
+    // ── A. Resolve chapter/hadith references for audioLinks ──────────────
     const chapterIdMap = {};
-    for (const chNum of allChapterNumbers) {
-      const row = await db.getFirstAsync(
-        'SELECT id FROM chapters WHERE chapter_number = ?;',
-        [chNum]
-      );
-      chapterIdMap[chNum] = row.id;
-    }
+    const hadithIdMap  = {};
 
-    // ── C. Resolve hadith references for audioLinks ───────────────────────
-    const hadithIdMap = {};
     for (const link of audioLinks) {
-      const mapKey = `${link.chapter_number}::${String(link.hadith_number).trim()}`;
-      if (hadithIdMap[mapKey] !== undefined) continue;
-
-      const chapterId = chapterIdMap[link.chapter_number];
-      const row = await db.getFirstAsync(
-        'SELECT id FROM hadiths WHERE chapter_id = ? AND hadith_number = ?;',
-        [chapterId, String(link.hadith_number).trim()]
-      );
-      if (!row) {
-        throw new Error(
-          `[AudioImporter] Hadith not found: chapter ${link.chapter_number}, ` +
-          `hadith_number "${link.hadith_number}".`
+      if (!chapterIdMap[link.chapter_number]) {
+        const row = await db.getFirstAsync(
+          'SELECT id FROM chapters WHERE chapter_number = ?;',
+          [link.chapter_number]
         );
+        if (!row) {
+          throw new Error(
+            `[AudioImporter] Chapter ${link.chapter_number} does not exist. ` +
+            'Import chapters first.'
+          );
+        }
+        chapterIdMap[link.chapter_number] = row.id;
       }
-      hadithIdMap[mapKey] = row.id;
+
+      const mapKey = `${link.chapter_number}::${String(link.hadith_number).trim()}`;
+      if (hadithIdMap[mapKey] === undefined) {
+        const chapterId = chapterIdMap[link.chapter_number];
+        const row = await db.getFirstAsync(
+          'SELECT id FROM hadiths WHERE chapter_id = ? AND hadith_number = ?;',
+          [chapterId, String(link.hadith_number).trim()]
+        );
+        if (!row) {
+          throw new Error(
+            `[AudioImporter] Hadith not found: chapter ${link.chapter_number}, ` +
+            `hadith_number "${link.hadith_number}".`
+          );
+        }
+        hadithIdMap[mapKey] = row.id;
+      }
     }
 
-    // ── D. Insert audio records ───────────────────────────────────────────
+    // ── B. Insert audio records ───────────────────────────────────────────
     const filenameToAudioId = {};
 
     for (const a of audios) {
@@ -278,13 +273,13 @@ export async function importAudioContent({ audios, audioLinks }) {
 
       const result = await db.runAsync(
         `INSERT INTO audios
-           (title, filename, chapter_from, chapter_to, ordering, pdf_page)
+           (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
          VALUES (?, ?, ?, ?, ?, ?);`,
         [
           a.title.trim(),
           fname,
-          a.chapter_from ?? null,
-          a.chapter_to   ?? null,
+          a.hadith_number_from,
+          a.hadith_number_to,
           a.ordering,
           a.pdf_page ?? null,
         ]
@@ -293,7 +288,7 @@ export async function importAudioContent({ audios, audioLinks }) {
       filenameToAudioId[fname] = result.lastInsertRowId;
     }
 
-    // ── E. Insert hadith_audio links ──────────────────────────────────────
+    // ── C. Insert hadith_audio links ──────────────────────────────────────
     for (const link of audioLinks) {
       const fname    = link.filename.trim();
       const audioId  = filenameToAudioId[fname];
@@ -319,8 +314,6 @@ export async function importAudioContent({ audios, audioLinks }) {
 
 /**
  * Returns true if both arrays are empty (nothing to import).
- * @param {{ audios: Array, audioLinks: Array }} content
- * @returns {boolean}
  */
 export function isAudioContentEmpty({ audios, audioLinks }) {
   return (
