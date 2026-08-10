@@ -115,22 +115,21 @@ export async function runDevSeed(db) {
     );
 
     // ── DEV audio records ─────────────────────────────────────────────
-    // Use chapter_from / chapter_to instead of the old chapter_id FK.
-    // Dev tracks all cover chapter 1 only (single-chapter range: from=1, to=1).
+    // Track 001 = Introduction (0/0), tracks 002-003 = hadiths 1 and 2.
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_from, chapter_to, ordering, pdf_page)
+      `INSERT INTO audios (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
        VALUES (?, ?, ?, ?, ?, ?);`,
-      ['[DEV] Track 001', '001.mp3', 1, 1, 1, 1]
+      ['[DEV] Track 001 — Introduction', '001.mp3', 0, 0, 1, 1]
     );
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_from, chapter_to, ordering, pdf_page)
+      `INSERT INTO audios (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
        VALUES (?, ?, ?, ?, ?, ?);`,
       ['[DEV] Track 002', '002.mp3', 1, 1, 2, 1]
     );
     await db.runAsync(
-      `INSERT INTO audios (title, filename, chapter_from, chapter_to, ordering, pdf_page)
+      `INSERT INTO audios (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
        VALUES (?, ?, ?, ?, ?, ?);`,
-      ['[DEV] Track 003', '003.mp3', 1, 1, 3, 1]
+      ['[DEV] Track 003', '003.mp3', 2, 2, 3, 1]
     );
 
     const aRow1 = await db.getFirstAsync(
