@@ -3,26 +3,19 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 
-/**
- * Generic full-screen error state.
- *
- * Props:
- *   message  {string}    — user-facing message (optional, defaults to generic)
- *   onRetry  {function}  — if provided, shows a "Try again" button
- */
 export default function ScreenError({ message, onRetry }) {
-  // Log technical details to console but never show them to the user.
   if (message) console.warn('[ScreenError]', message);
+
+  const safeMessage =
+    typeof message === 'string' && message.length < 100 && !message.includes('[')
+      ? message
+      : 'We could not load this content. Please try again.';
 
   return (
     <View style={styles.container}>
       <Text style={styles.icon}>⚠️</Text>
       <Text style={styles.title}>Something went wrong</Text>
-      <Text style={styles.body}>
-        {typeof message === 'string' && message.length < 100 && !message.includes('[')
-          ? message
-          : 'We could not load this content. Please try again.'}
-      </Text>
+      <Text style={styles.body}>{safeMessage}</Text>
       {!!onRetry && (
         <TouchableOpacity
           style={styles.button}

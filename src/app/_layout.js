@@ -1,11 +1,3 @@
-/**
- * Root layout — 3-screen navigation stack.
- *
- *   index  → IntroScreen  (shown once on cold launch, auto-navigates to /list)
- *   list   → AudioListScreen (main screen)
- *   reader → ReaderScreen (PDF viewer + audio player, opened with ?audioId=N)
- */
-
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -26,7 +18,7 @@ function AppShell() {
     }
   }, [dbStatus]);
 
-  // Keep native splash visible while DB is initialising.
+  // Keep native splash visible while the database is initialising
   if (dbStatus === DB_STATUS.IDLE || dbStatus === DB_STATUS.LOADING) {
     return null;
   }
@@ -50,8 +42,8 @@ function AppShell() {
   return (
     <AudioProvider>
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="index"  options={{ animation: 'none' }} />
-        <Stack.Screen name="list"   options={{ animation: 'fade' }} />
+        <Stack.Screen name="index" options={{ animation: 'none' }} />
+        <Stack.Screen name="list" options={{ animation: 'fade' }} />
         <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </AudioProvider>
@@ -76,7 +68,7 @@ const styles = StyleSheet.create({
     padding: 32,
     backgroundColor: '#fff',
   },
-  errorIcon:  { fontSize: 44, marginBottom: 16 },
+  errorIcon: { fontSize: 44, marginBottom: 16 },
   errorTitle: {
     fontSize: 18,
     fontWeight: '600',

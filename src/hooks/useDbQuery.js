@@ -2,27 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAppContext } from '@/context/AppContext';
 
-/**
- * Runs an async database query function and manages loading / error / data state.
- *
- * @param {() => Promise<any>} queryFn  - A function that calls a repository method.
- * @param {any[]}              deps     - Re-run when these values change (like useEffect deps).
- *
- * @returns {{ data, loading, error, refetch }}
- *
- * @example
- * const { data: chapters, loading, error } = useDbQuery(
- *   () => getAllChapters(),
- *   []
- * );
- */
+// Runs an async DB query and tracks data / loading / error.
+// Waits until the database is ready before querying.
 export function useDbQuery(queryFn, deps = []) {
   const { isDbReady } = useAppContext();
-  const [data, setData]       = useState(null);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
-
-  // Keep a stable ref so we can cancel stale requests on unmount / dep change.
+  const [error, setError] = useState(null);
   const cancelRef = useRef(false);
 
   const run = useCallback(async () => {

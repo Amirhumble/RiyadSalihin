@@ -1,32 +1,11 @@
-/**
- * AudioContext — global audio state.
- *
- * PERFORMANCE DESIGN
- * ──────────────────
- * The core performance problem with a naïve audio context is that
- * useAudioPlayerStatus fires ~2–4× per second while playing, and if
- * currentTime/isPlaying are in a single context value, every consumer
- * (including all 50 AudioList rows) re-renders on every tick.
- *
- * Solution: split into two contexts.
- *
- * AudioStableContext  — changes rarely (track switch, error, rate change)
- *   currentAudio, audioLoading, audioError, playbackRate
- *   commands: loadAudio, play, pause, seek, stop, setSpeed
- *
- * AudioLiveContext    — changes every status tick (playing, time, buffering)
- *   isPlaying, isBuffering, didJustFinish
- *   (currentTime and duration are NOT in context — read directly from the
- *    player ref inside PlayerBar using a local useAudioPlayerStatus call)
- *
- * AudioListScreen rows only consume AudioStableContext → zero re-renders
- * from playback ticks. Only PlayerBar subscribes to the live status.
- *
- * DB PERSISTENCE
- * ──────────────
- * Position is written to SQLite at most every 5 seconds while playing,
- * and immediately on pause.
- */
+// Shared audio state for the whole app.
+//
+// Two contexts keep list rows cheap:
+//   AudioStableContext — track, errors, speed, commands (rarely changes)
+//   AudioLiveContext   — playing / time / buffering (updates while playing)
+//
+// List rows use useAudio() so they do not re-render on every time tick.
+// PlayerBar uses useAudioPlayer() so it can show live progress.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAudioPlayerStatus } from 'expo-audio';
@@ -53,36 +32,29 @@ import {
 } from '@/services/AudioService';
 
 const PERSIST_INTERVAL_MS = 5_000;
-const SPEED_STORAGE_KEY   = '@riyadus:playback_speed';
-const DEFAULT_SPEED       = 1;
-
-// ── Contexts ──────────────────────────────────────────────────────────────────
+const SPEED_STORAGE_KEY = '@riyadus:playback_speed';
+const DEFAULT_SPEED = 1;
 
 const AudioStableContext = createContext(null);
-const AudioLiveContext   = createContext(null);
-
-// ── Provider ──────────────────────────────────────────────────────────────────
+const AudioLiveContext = createContext(null);
 
 export function AudioProvider({ children }) {
-  const [currentAudio,  setCurrentAudio]  = useState(null);
-  const [audioLoading,  setAudioLoading]  = useState(false);
-  const [audioError,    setAudioError]    = useState(null);
-  const [playbackRate,  setPlaybackRate]  = useState(DEFAULT_SPEED);
+  const [currentAudio, setCurrentAudio] = useState(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError, setAudioError] = useState(null);
+  const [playbackRate, setPlaybackRate] = useState(DEFAULT_SPEED);
 
-  // Keep the player ref stable for useAudioPlayerStatus
-  const playerRef    = useRef(getPlayer());
-  const lastPersist       = useRef(0);
-  // Tracks the audio ID whose duration has already been saved this session.
-  // Prevents writing the same duration repeatedly on every status tick.
-  const durationSavedFor  = useRef(null);
+  const playerRef = useRef(getPlayer());
+  const lastPersist = useRef(0);
+  // Only write duration once per track per session
+  const durationSavedFor = useRef(null);
 
-  // Live status — drives AudioLiveContext only
   const status = useAudioPlayerStatus(playerRef.current);
 
-  // ── Session config ─────────────────────────────────────────────────
-  useEffect(() => { configureAudioSession(); }, []);
+  useEffect(() => {
+    configureAudioSession();
+  }, []);
 
-  // ── Restore saved speed on mount ───────────────────────────────────
   useEffect(() => {
     AsyncStorage.getItem(SPEED_STORAGE_KEY).then((stored) => {
       const rate = stored ? parseFloat(stored) : DEFAULT_SPEED;
@@ -93,14 +65,14 @@ export function AudioProvider({ children }) {
     }).catch(() => {});
   }, []);
 
-  // ── Completion: reset DB position ──────────────────────────────────
+  // Reset saved position when a track finishes
   useEffect(() => {
     if (status.didJustFinish && currentAudio) {
       savePlaybackPosition(currentAudio.id, 0).catch(() => {});
     }
   }, [status.didJustFinish, currentAudio]);
 
-  // ── Throttled position persistence ────────────────────────────────
+  // Save position at most every 5 seconds while playing
   useEffect(() => {
     if (!status.playing || !currentAudio) return;
     const now = Date.now();
@@ -111,21 +83,14 @@ export function AudioProvider({ children }) {
     }
   }, [status.playing, status.currentTime, currentAudio]);
 
-  // ── One-time duration persistence ─────────────────────────────────
-  // Saves duration_ms the first time expo-audio reports a valid duration
-  // for the current track. Only writes once per loaded track per session,
-  // and only when the DB row doesn't already have a stored duration.
+  // Save duration the first time expo-audio reports it for this track
   useEffect(() => {
     if (!currentAudio) return;
 
-    // Validate the reported duration
     const secs = status.duration;
     if (!secs || !isFinite(secs) || secs <= 0) return;
-
-    // Guard: already saved duration for this audio ID this session
     if (durationSavedFor.current === currentAudio.id) return;
 
-    // Guard: DB row already has a valid duration — skip the write
     if (currentAudio.duration_ms > 0) {
       durationSavedFor.current = currentAudio.id;
       return;
@@ -137,8 +102,6 @@ export function AudioProvider({ children }) {
       console.warn('[AudioContext] saveDuration failed:', err)
     );
   }, [status.duration, currentAudio]);
-
-  // ── Commands ──────────────────────────────────────────────────────
 
   const loadAudio = useCallback(async (audioRecord, startPositionMs = 0) => {
     if (!audioRecord?.filename) {
@@ -154,14 +117,13 @@ export function AudioProvider({ children }) {
     setAudioLoading(true);
     setAudioError(null);
     setCurrentAudio(audioRecord);
-    // Reset so the new track's duration gets persisted when expo-audio reports it
     durationSavedFor.current = null;
 
     try {
       loadSource(source);
-      // Re-apply current speed to the new track
       svcSetRate(playbackRate);
       if (startPositionMs > 0) {
+        // Brief delay so the new source is ready before seeking
         setTimeout(() => svcSeekTo(startPositionMs / 1_000).catch(() => {}), 300);
       }
       svcPlay();
@@ -175,7 +137,11 @@ export function AudioProvider({ children }) {
 
   const play = useCallback(() => {
     setAudioError(null);
-    try { svcPlay(); } catch (err) { setAudioError(err); }
+    try {
+      svcPlay();
+    } catch (err) {
+      setAudioError(err);
+    }
   }, []);
 
   const pause = useCallback(() => {
@@ -191,15 +157,20 @@ export function AudioProvider({ children }) {
   }, [currentAudio]);
 
   const seek = useCallback(async (seconds) => {
-    try { await svcSeekTo(seconds); }
-    catch (err) { console.warn('[AudioContext] seek failed:', err); }
+    try {
+      await svcSeekTo(seconds);
+    } catch (err) {
+      console.warn('[AudioContext] seek failed:', err);
+    }
   }, []);
 
   const stop = useCallback(async () => {
     try {
       await svcStop();
       if (currentAudio) savePlaybackPosition(currentAudio.id, 0).catch(() => {});
-    } catch (err) { console.warn('[AudioContext] stop failed:', err); }
+    } catch (err) {
+      console.warn('[AudioContext] stop failed:', err);
+    }
   }, [currentAudio]);
 
   const setSpeed = useCallback((rate) => {
@@ -208,9 +179,6 @@ export function AudioProvider({ children }) {
     AsyncStorage.setItem(SPEED_STORAGE_KEY, String(rate)).catch(() => {});
   }, []);
 
-  // ── Context values ────────────────────────────────────────────────
-
-  // Stable: only changes on track switch / error / speed change
   const stableValue = {
     currentAudio,
     audioLoading,
@@ -225,13 +193,12 @@ export function AudioProvider({ children }) {
     setSpeed,
   };
 
-  // Live: changes on every status tick — only PlayerBar subscribes
   const liveValue = {
-    isPlaying:    status.playing      ?? false,
-    isBuffering:  status.isBuffering  ?? false,
+    isPlaying: status.playing ?? false,
+    isBuffering: status.isBuffering ?? false,
     didJustFinish: status.didJustFinish ?? false,
-    currentTime:  status.currentTime  ?? 0,
-    duration:     status.duration     ?? 0,
+    currentTime: status.currentTime ?? 0,
+    duration: status.duration ?? 0,
   };
 
   return (
@@ -243,30 +210,18 @@ export function AudioProvider({ children }) {
   );
 }
 
-// ── Hooks ─────────────────────────────────────────────────────────────────────
-
-/**
- * useAudio() — stable audio state + commands.
- * Safe to use in FlatList rows — does NOT re-render on playback ticks.
- * Provides: currentAudio, audioLoading, audioError, playbackRate,
- *           loadAudio, play, pause, seek, stop, setSpeed, clearAudioError.
- * Also includes isPlaying from the live context (needed for row active state).
- */
+// Stable state + commands. Safe in list rows (does not tick with playback time).
 export function useAudio() {
   const stable = useContext(AudioStableContext);
-  const live   = useContext(AudioLiveContext);
+  const live = useContext(AudioLiveContext);
   if (!stable) throw new Error('useAudio must be used within AudioProvider');
   return { ...stable, isPlaying: live.isPlaying };
 }
 
-/**
- * useAudioPlayer() — full live playback state for the player UI.
- * Re-renders on every status tick (~2–4× per second while playing).
- * Only use inside the PlayerBar component.
- */
+// Full live state for the player UI. Re-renders while audio plays.
 export function useAudioPlayer() {
   const stable = useContext(AudioStableContext);
-  const live   = useContext(AudioLiveContext);
+  const live = useContext(AudioLiveContext);
   if (!stable) throw new Error('useAudioPlayer must be used within AudioProvider');
   return { ...stable, ...live };
 }

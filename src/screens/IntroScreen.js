@@ -1,10 +1,3 @@
-/**
- * IntroScreen — branded cover screen shown once on cold launch.
- *
- * Automatically navigates to /list after INTRO_DURATION_MS.
- * router.replace() is used so back never returns here.
- */
-
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
@@ -19,6 +12,7 @@ export default function IntroScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  // replace() so the back button never returns to intro
   useEffect(() => {
     const timer = setTimeout(() => router.replace('/list'), INTRO_DURATION_MS);
     return () => clearTimeout(timer);
@@ -28,24 +22,18 @@ export default function IntroScreen() {
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
-      {/* Subtle corner rings — pure RN shapes, no images */}
       <View style={styles.ringTopRight} pointerEvents="none" />
       <View style={styles.ringTopRightSmall} pointerEvents="none" />
       <View style={styles.ringBottomLeft} pointerEvents="none" />
 
-      {/* Gold top & bottom rules */}
       <View style={styles.goldRuleTop} pointerEvents="none" />
       <View style={styles.goldRuleBottom} pointerEvents="none" />
 
-      {/* Centre content */}
       <View style={styles.content}>
         <Text style={styles.arabicTitle}>رياض الصالحين</Text>
-
         <View style={styles.goldDivider} />
-
         <Text style={styles.latinTitle}>Riyad as-Salihin</Text>
         <Text style={styles.subtitle}>Gardens of the Righteous</Text>
-
         <Text style={styles.author}>
           Imam Yahya ibn Sharaf al-Nawawi
         </Text>
@@ -62,8 +50,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-
-  // Decorative rings
   ringTopRight: {
     position: 'absolute',
     top: -130,
@@ -94,8 +80,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
-
-  // Gold rules
   goldRuleTop: {
     position: 'absolute',
     top: 0,
@@ -114,8 +98,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gold,
     opacity: 0.6,
   },
-
-  // Content
   content: {
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
