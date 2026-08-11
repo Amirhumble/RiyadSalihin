@@ -1,18 +1,25 @@
 /**
  * AudioListScreen — main screen of the application.
  *
- * Shows all audio lessons in a clean scrollable list.
- * Tapping any row opens the Reader with that audio.
+ * PERFORMANCE
+ * ───────────
+ * AudioRow is wrapped in React.memo. It only re-renders when its own
+ * `audio` prop or the active/playing state changes — NOT on every
+ * playback tick. This keeps 50+ rows performant during audio playback.
+ *
+ * useAudio() only returns stable context + isPlaying (not currentTime),
+ * so row re-renders are limited to track-switch and play/pause events.
  */
 
 import { useRouter } from 'expo-router';
+import { memo, useCallback } from 'react';
 import {
-    FlatList,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -48,6 +55,12 @@ export default function AudioListScreen() {
     []
   );
 
+  // Stable callback — does not change identity on re-render
+  const handlePress = useCallback(
+    (audioId) => router.push(`/reader?audioId=${audioId}`),
+    [router]
+  );
+
   if (loading) return <ScreenLoader message="Loading lessons…" />;
   if (error)   return (
     <ScreenError
@@ -62,43 +75,43 @@ export default function AudioListScreen() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
-      {/* ── Header ──────────────────────────────────────────────── */}
+      {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
-          {/* Decorative gold rule */}
           <View style={styles.headerGoldRule} />
-
           <Text style={styles.headerArabic}>رياض الصالحين</Text>
           <Text style={styles.headerLatin}>Riyad as-Salihin</Text>
-
           <View style={styles.headerDivider} />
-
           <Text style={styles.headerInstruction}>
             {count > 0
-              ? `${count} lesson${count !== 1 ? 's' : ''} · Tap to listen and read`
+              ? `${count} lesson${count !== 1 ? 's' : ''} · Tap a lesson to listen and read`
               : 'Select a lesson to listen and read'}
           </Text>
         </View>
       </SafeAreaView>
 
-      {/* ── List ────────────────────────────────────────────────── */}
+      {/* List */}
       <FlatList
         data={audios}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={keyExtractor}
         renderItem={({ item }) => (
-          <AudioRow
-            audio={item}
-            onPress={() => router.push(`/reader?audioId=${item.id}`)}
-          />
+          <AudioRow audio={item} onPress={handlePress} />
         )}
-        ListEmptyComponent={<EmptyView />}
+        ListEmptyComponent={EmptyView}
         contentContainerStyle={count === 0 ? styles.emptyFill : styles.listContent}
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={Separator}
+        // Performance: avoid re-rendering every row on scroll
+        removeClippedSubviews={false}
+        maxToRenderPerBatch={15}
+        windowSize={10}
+        initialNumToRender={12}
       />
     </View>
   );
 }
+
+function keyExtractor(item) { return String(item.id); }
 
 // ── Separator ─────────────────────────────────────────────────────────────────
 
@@ -121,29 +134,32 @@ function EmptyView() {
 }
 
 // ── AudioRow ──────────────────────────────────────────────────────────────────
+// memo: only re-renders when audio prop or isActive/isPlaying changes.
+// Does NOT re-render on currentTime updates — those only affect PlayerBar.
 
-function AudioRow({ audio, onPress }) {
+const AudioRow = memo(function AudioRow({ audio, onPress }) {
   const { currentAudio, isPlaying } = useAudio();
 
-  const isActive      = currentAudio?.id === audio.id;
-  const isNowPlaying  = isActive && isPlaying;
+  const isActive     = currentAudio?.id === audio.id;
+  const isNowPlaying = isActive && isPlaying;
 
-  const hasDuration   = audio.duration_ms > 0;
-  const hasPosition   = (audio.position_ms ?? 0) > 500; // ignore sub-half-second noise
-  const progressRatio = hasDuration
+  const hasDuration  = audio.duration_ms > 0;
+  const hasPosition  = (audio.position_ms ?? 0) > 500;
+  const progress     = hasDuration
     ? Math.min((audio.position_ms ?? 0) / audio.duration_ms, 1)
     : 0;
-  const isCompleted   = hasDuration && progressRatio >= 0.98;
-  const inProgress    = hasPosition && !isCompleted;
+  const isCompleted  = hasDuration && progress >= 0.98;
+  const inProgress   = hasPosition && !isCompleted;
 
   const rangeLabel = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
   const duration   = fmtMs(audio.duration_ms);
   const position   = fmtSec((audio.position_ms ?? 0) / 1000);
+  const totalDur   = fmtMs(audio.duration_ms);
 
   return (
     <TouchableOpacity
       style={[styles.row, isActive && styles.rowActive]}
-      onPress={onPress}
+      onPress={() => onPress(audio.id)}
       activeOpacity={0.72}
       accessibilityRole="button"
       accessibilityLabel={`Lesson ${audio.ordering}: ${audio.title}`}
@@ -159,7 +175,6 @@ function AudioRow({ audio, onPress }) {
 
       {/* Centre info */}
       <View style={styles.info}>
-        {/* Title */}
         <Text
           style={[styles.title, isActive && styles.titleActive]}
           numberOfLines={2}
@@ -167,12 +182,11 @@ function AudioRow({ audio, onPress }) {
           {audio.title}
         </Text>
 
-        {/* Hadith range label */}
         {rangeLabel ? (
           <Text style={styles.range} numberOfLines={1}>{rangeLabel}</Text>
         ) : null}
 
-        {/* Bottom row: duration / progress / resume label */}
+        {/* Meta: duration / resume / completed */}
         <View style={styles.meta}>
           {duration ? (
             <Text style={styles.metaText}>{duration}</Text>
@@ -181,8 +195,10 @@ function AudioRow({ audio, onPress }) {
           {inProgress && (
             <>
               <Text style={styles.metaDot}>·</Text>
-              <Text style={[styles.metaText, styles.resumeLabel]}>
-                {`Continue · ${position}`}
+              <Text style={[styles.metaText, styles.resumeText]}>
+                {totalDur
+                  ? `Continue · ${position} / ${totalDur}`
+                  : `Continue · ${position}`}
               </Text>
             </>
           )}
@@ -190,7 +206,7 @@ function AudioRow({ audio, onPress }) {
           {isCompleted && (
             <>
               <Text style={styles.metaDot}>·</Text>
-              <Text style={[styles.metaText, styles.completedLabel]}>Completed</Text>
+              <Text style={[styles.metaText, styles.completedText]}>✓ Completed</Text>
             </>
           )}
         </View>
@@ -201,29 +217,32 @@ function AudioRow({ audio, onPress }) {
             <View
               style={[
                 styles.progressFill,
-                { width: `${Math.round(progressRatio * 100)}%` },
+                { width: `${Math.round(progress * 100)}%` },
               ]}
             />
           </View>
         )}
       </View>
 
-      {/* Play indicator */}
+      {/* Play state indicator */}
       <View
         style={[
           styles.playBtn,
           isActive && styles.playBtnActive,
           isNowPlaying && styles.playBtnPlaying,
         ]}
-        accessibilityElementsHidden
       >
-        <Text style={[styles.playIcon, isActive && styles.playIconActive]}>
+        <Text style={[
+          styles.playIcon,
+          isActive && styles.playIconActive,
+          isNowPlaying && styles.playIconPlaying,
+        ]}>
           {isNowPlaying ? '▶' : '▷'}
         </Text>
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -234,9 +253,7 @@ const styles = StyleSheet.create({
   },
 
   // Header
-  headerSafe: {
-    backgroundColor: colors.hero,
-  },
+  headerSafe: { backgroundColor: colors.hero },
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -246,12 +263,10 @@ const styles = StyleSheet.create({
   },
   headerGoldRule: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    top: 0, left: 0, right: 0,
     height: 2,
     backgroundColor: colors.gold,
-    opacity: 0.5,
+    opacity: 0.55,
   },
   headerArabic: {
     fontSize: 30,
@@ -271,7 +286,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   headerDivider: {
-    width: 40,
+    width: 36,
     height: 1,
     backgroundColor: colors.gold,
     opacity: 0.5,
@@ -290,13 +305,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.xxl,
   },
-  emptyFill: {
-    flex: 1,
-  },
+  emptyFill: { flex: 1 },
+
   separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
-    marginLeft: 72 + spacing.md, // align with info column start
+    marginLeft: 72 + spacing.md,
   },
 
   // Empty
@@ -307,10 +321,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xxl,
   },
-  emptyIcon: {
-    fontSize: 44,
-    marginBottom: spacing.md,
-  },
+  emptyIcon:  { fontSize: 44, marginBottom: spacing.md },
   emptyTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -334,11 +345,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     minHeight: 76,
   },
-  rowActive: {
-    backgroundColor: colors.primaryLight,
-  },
+  rowActive: { backgroundColor: colors.primaryLight },
 
-  // Number badge
+  // Badge
   badge: {
     width: 44,
     height: 44,
@@ -349,23 +358,16 @@ const styles = StyleSheet.create({
     marginRight: spacing.md,
     flexShrink: 0,
   },
-  badgeActive: {
-    backgroundColor: colors.primary,
-  },
+  badgeActive: { backgroundColor: colors.primary },
   badgeText: {
     fontSize: 13,
     fontWeight: '700',
     color: colors.textMuted,
   },
-  badgeTextActive: {
-    color: colors.textInverse,
-  },
+  badgeTextActive: { color: colors.textInverse },
 
   // Info
-  info: {
-    flex: 1,
-    marginRight: spacing.sm,
-  },
+  info: { flex: 1, marginRight: spacing.sm },
   title: {
     fontSize: 15,
     fontWeight: '600',
@@ -373,16 +375,14 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 2,
   },
-  titleActive: {
-    color: colors.primary,
-  },
+  titleActive: { color: colors.primary },
   range: {
     fontSize: 12,
     color: colors.textMuted,
     marginBottom: 4,
   },
 
-  // Meta row
+  // Meta
   meta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -394,18 +394,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontVariant: ['tabular-nums'],
   },
-  metaDot: {
-    fontSize: 11,
-    color: colors.borderLight,
-  },
-  resumeLabel: {
-    color: colors.primary,
-    fontWeight: '500',
-  },
-  completedLabel: {
-    color: colors.success,
-    fontWeight: '500',
-  },
+  metaDot: { fontSize: 11, color: colors.borderLight },
+  resumeText: { color: colors.primary, fontWeight: '500' },
+  completedText: { color: colors.success, fontWeight: '500' },
 
   // Progress bar
   progressTrack: {
@@ -432,19 +423,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
-  playBtnActive: {
-    borderColor: colors.primary,
-  },
-  playBtnPlaying: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  playIcon: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginLeft: 2,
-  },
-  playIconActive: {
-    color: colors.primary,
-  },
+  playBtnActive: { borderColor: colors.primary },
+  playBtnPlaying: { backgroundColor: colors.primary, borderColor: colors.primary },
+  playIcon: { fontSize: 14, color: colors.textMuted, marginLeft: 2 },
+  playIconActive: { color: colors.primary },
+  playIconPlaying: { color: colors.textInverse },
 });

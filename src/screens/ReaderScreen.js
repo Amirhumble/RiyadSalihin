@@ -3,39 +3,56 @@
  *
  * Route: /reader?audioId=<id>
  *
- * Flow:
- *   1. Load audio record from SQLite.
- *   2. Resolve bundled PDF to a local file:// URI via expo-asset.
- *   3. After onLoadComplete fires, call pdfRef.setPage(audio.pdf_page).
- *   4. Load audio into AudioContext and start playing from saved position.
+ * PDF PERFORMANCE
+ * ───────────────
+ * The PDF is a single bundled file. Its asset resolution (expo-asset) is
+ * done once and the resulting URI is cached in a module-level variable so
+ * switching audio tracks does NOT re-resolve or re-mount the PDF.
  *
- * The PDF occupies most of the screen. The player bar is fixed at the
- * bottom and never scrolls away.
+ * The <Pdf> component remains mounted throughout the screen's lifetime.
+ * When a different audio is opened its page is set via pdfRef.setPage()
+ * rather than re-mounting the component.
+ *
+ * AUDIO PERFORMANCE
+ * ─────────────────
+ * PlayerBar uses useAudioPlayer() which subscribes to high-frequency
+ * status updates. The rest of ReaderScreen uses stable context only and
+ * does NOT re-render on playback ticks.
  */
 
 import { Asset } from 'expo-asset';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
-import { useAudio } from '@/context/AudioContext';
+import { useAudio, useAudioPlayer } from '@/context/AudioContext';
 import { getAudioByIdWithChapterInfo } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// Metro resolves this require at build time.
+// ── PDF asset — cached at module level to avoid repeat resolution ─────────────
 const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
+let _cachedPdfUri = null; // set once, reused forever
 
-// Lazy-load so a missing native module shows a friendly error instead of crashing.
+// Lazy-load react-native-pdf
 let Pdf = null;
 let pdfModuleError = null;
 try {
@@ -44,8 +61,10 @@ try {
   pdfModuleError = err;
 }
 
-// ── Utility ───────────────────────────────────────────────────────────────────
+// ── Playback speed options ────────────────────────────────────────────────────
+const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
+// ── Utility ───────────────────────────────────────────────────────────────────
 function fmt(sec) {
   if (!sec || isNaN(sec) || sec < 0) return '0:00';
   const s = Math.floor(sec);
@@ -60,26 +79,31 @@ export default function ReaderScreen() {
   const { audioId } = useLocalSearchParams();
   const id          = Number(audioId);
 
-  // Audio record from DB
+  // Audio DB record
   const { data: audio, loading: audioLoading, error: audioDbError } =
     useDbQuery(() => getAudioByIdWithChapterInfo(id), [id]);
 
   // PDF state
-  const [pdfUri,       setPdfUri]       = useState(null);
-  const [pdfResolving, setPdfResolving] = useState(true);
+  const [pdfUri,       setPdfUri]       = useState(_cachedPdfUri);
+  const [pdfResolving, setPdfResolving] = useState(!_cachedPdfUri);
   const [pdfRendering, setPdfRendering] = useState(false);
   const [pdfError,     setPdfError]     = useState(pdfModuleError);
   const [currentPage,  setCurrentPage]  = useState(1);
   const [totalPages,   setTotalPages]   = useState(0);
 
-  // pdfRef for programmatic setPage after load
-  const pdfRef   = useRef(null);
-  // audioRef so onLoadComplete closure can read pdf_page without stale capture
+  const pdfRef  = useRef(null);
   const audioRef = useRef(null);
   useEffect(() => { audioRef.current = audio; }, [audio]);
 
-  // Resolve PDF asset to a local file:// URI once on mount
+  // Resolve PDF once — uses module-level cache so switching tracks is free
   const resolvePdf = useCallback(async (cancelRef) => {
+    // Already resolved from a previous screen visit
+    if (_cachedPdfUri) {
+      setPdfUri(_cachedPdfUri);
+      setPdfResolving(false);
+      setPdfRendering(true);
+      return;
+    }
     try {
       setPdfResolving(true);
       setPdfError(null);
@@ -87,6 +111,7 @@ export default function ReaderScreen() {
       await asset.downloadAsync();
       if (cancelRef?.current) return;
       if (!asset.localUri) throw new Error('PDF could not be prepared.');
+      _cachedPdfUri = asset.localUri; // cache for future visits
       setPdfUri(asset.localUri);
       setPdfRendering(true);
     } catch (err) {
@@ -104,10 +129,9 @@ export default function ReaderScreen() {
     return () => { cancelRef.current = true; };
   }, [resolvePdf]);
 
-  // Load audio once when the DB record arrives
-  const { loadAudio }    = useAudio();
-  const audioLoadedRef   = useRef(false);
-
+  // Load audio once on mount
+  const { loadAudio } = useAudio();
+  const audioLoadedRef = useRef(false);
   useEffect(() => {
     if (!audio || audioLoadedRef.current) return;
     audioLoadedRef.current = true;
@@ -147,7 +171,6 @@ export default function ReaderScreen() {
       {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
-          {/* Back */}
           <TouchableOpacity
             style={styles.headerBack}
             onPress={() => router.back()}
@@ -158,38 +181,27 @@ export default function ReaderScreen() {
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
 
-          {/* Title */}
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {audio?.title ?? 'Loading…'}
             </Text>
             {audio ? (
               <Text style={styles.headerSub} numberOfLines={1}>
-                {formatHadithRange(
-                  audio.hadith_number_from,
-                  audio.hadith_number_to
-                ) ?? ''}
+                {formatHadithRange(audio.hadith_number_from, audio.hadith_number_to) ?? ''}
               </Text>
             ) : null}
           </View>
 
-          {/* Page counter */}
           <View style={styles.headerRight}>
             {totalPages > 0 ? (
-              <Text style={styles.pageCounter}>
-                {currentPage} / {totalPages}
-              </Text>
-            ) : (
-              // keeps header balanced when counter is absent
-              <View style={styles.headerRight} />
-            )}
+              <Text style={styles.pageCounter}>{currentPage} / {totalPages}</Text>
+            ) : <View style={styles.headerRight} />}
           </View>
         </View>
       </SafeAreaView>
 
-      {/* PDF area */}
+      {/* PDF */}
       <View style={styles.pdfArea}>
-        {/* Loading overlay */}
         {(isLoading || pdfRendering) && !pdfError && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -202,10 +214,7 @@ export default function ReaderScreen() {
         {pdfError ? (
           <PdfErrorView
             error={pdfError}
-            onRetry={() => {
-              setPdfUri(null);
-              resolvePdf({ current: false });
-            }}
+            onRetry={() => { setPdfUri(null); _cachedPdfUri = null; resolvePdf({ current: false }); }}
           />
         ) : Pdf && pdfUri ? (
           <Pdf
@@ -223,18 +232,11 @@ export default function ReaderScreen() {
         ) : null}
       </View>
 
-      {/* Fixed audio player */}
-      <View
-        style={[
-          styles.playerBar,
-          { paddingBottom: Math.max(insets.bottom, spacing.sm) },
-        ]}
-      >
+      {/* Player */}
+      <View style={[styles.playerBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
         {audioDbError ? (
           <View style={styles.playerMessage}>
-            <Text style={styles.playerMessageText}>
-              Audio is currently unavailable.
-            </Text>
+            <Text style={styles.playerMessageText}>Audio is currently unavailable.</Text>
           </View>
         ) : audio ? (
           <PlayerBar audio={audio} />
@@ -249,14 +251,17 @@ export default function ReaderScreen() {
 }
 
 // ── PlayerBar ─────────────────────────────────────────────────────────────────
+// Uses useAudioPlayer() which re-renders on every status tick.
+// Isolated here so ReaderScreen itself does not re-render.
 
-function PlayerBar({ audio }) {
+const PlayerBar = memo(function PlayerBar({ audio }) {
   const {
-    currentAudio, audioLoading, audioError, clearAudioError,
-    isPlaying, isBuffering,
+    currentAudio, audioError, clearAudioError,
+    isPlaying, isBuffering, audioLoading,
     currentTime, duration,
-    loadAudio, play, pause, seek,
-  } = useAudio();
+    playbackRate,
+    loadAudio, play, pause, seek, setSpeed,
+  } = useAudioPlayer();
 
   const isThis    = currentAudio?.id === audio?.id;
   const playing   = isThis && isPlaying;
@@ -266,11 +271,13 @@ function PlayerBar({ audio }) {
   const progress  = isThis && dur > 0 ? Math.min(time / dur, 1) : 0;
   const trackW    = useRef(0);
 
+  const [speedOpen, setSpeedOpen] = useState(false);
+
   const handlePlayPause = useCallback(() => {
     clearAudioError();
-    if (!isThis)       loadAudio(audio, audio.position_ms ?? 0);
-    else if (playing)  pause();
-    else               play();
+    if (!isThis)      loadAudio(audio, audio.position_ms ?? 0);
+    else if (playing) pause();
+    else              play();
   }, [isThis, playing, audio, loadAudio, play, pause, clearAudioError]);
 
   const handleSeek = useCallback((e) => {
@@ -283,16 +290,29 @@ function PlayerBar({ audio }) {
     seek(Math.max(0, Math.min(time + delta, dur)));
   }, [isThis, time, dur, seek]);
 
+  const handleSelectSpeed = useCallback((rate) => {
+    setSpeed(rate);
+    setSpeedOpen(false);
+  }, [setSpeed]);
+
+  const speedLabel = useMemo(
+    () => (playbackRate === 1 ? '1×' : `${playbackRate}×`),
+    [playbackRate]
+  );
+
   return (
     <View style={pl.container}>
-      {/* Audio error */}
+      {/* Title */}
+      <Text style={pl.title} numberOfLines={1}>{audio?.title ?? ''}</Text>
+
+      {/* Error */}
       {isThis && audioError && (
         <Text style={pl.errorText} numberOfLines={1}>
           Audio is currently unavailable. Please try again.
         </Text>
       )}
 
-      {/* Controls: –10 / Play-Pause / +10 */}
+      {/* Controls row: –10 / Play / +10 / Speed */}
       <View style={pl.controls}>
         <TouchableOpacity
           style={pl.skipBtn}
@@ -331,6 +351,17 @@ function PlayerBar({ audio }) {
           <Text style={pl.skipLabel}>10</Text>
           <Text style={pl.skipIcon}>↻</Text>
         </TouchableOpacity>
+
+        {/* Speed button */}
+        <TouchableOpacity
+          style={pl.speedBtn}
+          onPress={() => setSpeedOpen(true)}
+          activeOpacity={0.75}
+          accessibilityLabel={`Playback speed: ${speedLabel}`}
+          accessibilityRole="button"
+        >
+          <Text style={pl.speedLabel}>{speedLabel}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Progress bar + times */}
@@ -339,22 +370,15 @@ function PlayerBar({ audio }) {
           style={pl.track}
           onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
         >
-          {/* Large invisible touch target over the track */}
           <TouchableOpacity
             style={pl.trackTouchTarget}
             onPress={handleSeek}
             activeOpacity={1}
             accessibilityRole="adjustable"
             accessibilityLabel="Seek audio position"
-            accessibilityValue={{
-              now: Math.round(time),
-              min: 0,
-              max: Math.round(dur),
-            }}
+            accessibilityValue={{ now: Math.round(time), min: 0, max: Math.round(dur) }}
           />
-          {/* Filled portion */}
           <View style={[pl.fill, { width: `${Math.round(progress * 100)}%` }]} />
-          {/* Thumb */}
           <View style={[pl.thumb, { left: `${Math.round(progress * 100)}%` }]} />
         </View>
 
@@ -364,25 +388,65 @@ function PlayerBar({ audio }) {
         </View>
       </View>
 
-      {/* DEV — never shown in production builds */}
+      {/* DEV overlay */}
       {__DEV__ && isThis && (
         <Text style={pl.devText} numberOfLines={1}>
-          {`DEV  ${audio?.filename ?? '—'}  ${playing ? '▶' : '⏸'}  ${fmt(time)} / ${fmt(dur)}`}
+          {`DEV  ${audio?.filename}  ${playing ? '▶' : '⏸'}  ${fmt(time)}/${fmt(dur)}  ${playbackRate}×`}
         </Text>
       )}
+
+      {/* Speed selector sheet */}
+      <SpeedSheet
+        visible={speedOpen}
+        current={playbackRate}
+        onSelect={handleSelectSpeed}
+        onClose={() => setSpeedOpen(false)}
+      />
     </View>
   );
-}
+});
+
+// ── SpeedSheet ────────────────────────────────────────────────────────────────
+
+const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClose }) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <Pressable style={sp.backdrop} onPress={onClose} />
+      <View style={sp.sheet}>
+        <View style={sp.handle} />
+        <Text style={sp.sheetTitle}>Playback Speed</Text>
+        {SPEED_OPTIONS.map((rate) => (
+          <TouchableOpacity
+            key={rate}
+            style={[sp.option, current === rate && sp.optionActive]}
+            onPress={() => onSelect(rate)}
+            activeOpacity={0.75}
+            accessibilityRole="radio"
+            accessibilityLabel={`${rate}×`}
+            accessibilityState={{ selected: current === rate }}
+          >
+            <Text style={[sp.optionText, current === rate && sp.optionTextActive]}>
+              {rate === 1 ? '1×  (Normal)' : `${rate}×`}
+            </Text>
+            {current === rate && <Text style={sp.check}>✓</Text>}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </Modal>
+  );
+});
 
 // ── PdfErrorView ──────────────────────────────────────────────────────────────
 
 function PdfErrorView({ error, onRetry }) {
   const msg      = error?.message ?? '';
-  const isNative =
-    msg.includes('NativeModule') ||
-    msg.includes('RNPDFPdf') ||
-    msg.includes('cannot be null');
-
+  const isNative = msg.includes('NativeModule') || msg.includes('RNPDFPdf') || msg.includes('cannot be null');
   return (
     <View style={styles.pdfError}>
       <Text style={styles.pdfErrorIcon}>📄</Text>
@@ -390,9 +454,7 @@ function PdfErrorView({ error, onRetry }) {
         {isNative ? 'PDF viewer is not available' : 'Could not open the book'}
       </Text>
       <Text style={styles.pdfErrorBody}>
-        {isNative
-          ? 'Please rebuild the development client.'
-          : 'The file could not be read. Please try again.'}
+        {isNative ? 'Please rebuild the development client.' : 'The file could not be read. Please try again.'}
       </Text>
       {!isNative && onRetry && (
         <TouchableOpacity
@@ -429,17 +491,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 44,
   },
-  backArrow: {
-    fontSize: 32,
-    color: colors.heroText,
-    lineHeight: 36,
-    marginTop: -2,
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-  },
+  backArrow: { fontSize: 32, color: colors.heroText, lineHeight: 36, marginTop: -2 },
+  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: spacing.xs },
   headerTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -473,11 +526,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
-  loadingText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-  },
+  loadingText: { fontSize: 14, color: colors.textMuted, marginTop: spacing.sm },
 
   // PDF error
   pdfError: {
@@ -510,11 +559,11 @@ const styles = StyleSheet.create({
   },
   pdfRetryText: { color: colors.textInverse, fontSize: 15, fontWeight: '600' },
 
-  // Player bar wrapper
+  // Player bar
   playerBar: {
     backgroundColor: colors.hero,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
   },
   playerMessage: {
     paddingVertical: spacing.sm + 2,
@@ -522,15 +571,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 44,
   },
-  playerMessageText: {
-    fontSize: 13,
-    color: colors.heroSubtext,
-    textAlign: 'center',
-  },
+  playerMessageText: { fontSize: 13, color: colors.heroSubtext, textAlign: 'center' },
 });
 
 const pl = StyleSheet.create({
   container: { paddingBottom: spacing.xs },
+
+  title: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.heroSubtext,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    letterSpacing: 0.2,
+  },
 
   errorText: {
     fontSize: 12,
@@ -539,32 +593,25 @@ const pl = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
-  // Controls row
+  // Controls
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xl,
-    marginBottom: spacing.md,
+    gap: spacing.lg,
+    marginBottom: spacing.sm,
   },
-
-  // Skip buttons
   skipBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    minWidth: 52,
+    gap: 2,
+    minWidth: 48,
     minHeight: 44,
     justifyContent: 'center',
   },
   skipIcon:  { fontSize: 20, color: colors.heroSubtext },
-  skipLabel: {
-    fontSize: 12,
-    color: colors.heroSubtext,
-    fontVariant: ['tabular-nums'],
-  },
+  skipLabel: { fontSize: 12, color: colors.heroSubtext, fontVariant: ['tabular-nums'] },
 
-  // Main play/pause button — deliberately large and prominent
   playBtn: {
     width: 68,
     height: 68,
@@ -575,10 +622,25 @@ const pl = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playIcon: {
-    fontSize: 28,
+  playIcon: { fontSize: 28, color: colors.heroText, marginLeft: 3 },
+
+  // Speed button
+  speedBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  speedLabel: {
+    fontSize: 13,
+    fontWeight: '700',
     color: colors.heroText,
-    marginLeft: 3,
+    letterSpacing: 0.3,
   },
 
   // Progress
@@ -590,11 +652,10 @@ const pl = StyleSheet.create({
     overflow: 'visible',
     position: 'relative',
   },
-  // Invisible tall touch target over the track for easy tapping
   trackTouchTarget: {
     ...StyleSheet.absoluteFillObject,
-    top: -12,
-    bottom: -12,
+    top: -14,
+    bottom: -14,
   },
   fill: {
     position: 'absolute',
@@ -616,22 +677,77 @@ const pl = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 2,
   },
-  times: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
+  times: { flexDirection: 'row', justifyContent: 'space-between' },
   timeText: {
     fontSize: 11,
     color: colors.heroSubtext,
     fontVariant: ['tabular-nums'],
   },
 
-  // DEV only
   devText: {
     fontSize: 9,
     color: colors.heroMuted,
     marginTop: spacing.xs,
     fontFamily: 'monospace',
     textAlign: 'center',
+  },
+});
+
+const sp = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
+    paddingTop: spacing.sm,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderLight,
+    marginBottom: spacing.md,
+  },
+  sheetTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md - 2,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 10,
+    marginBottom: 2,
+  },
+  optionActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  optionText: {
+    fontSize: 16,
+    color: colors.text,
+  },
+  optionTextActive: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  check: {
+    fontSize: 15,
+    color: colors.primary,
+    fontWeight: '700',
   },
 });

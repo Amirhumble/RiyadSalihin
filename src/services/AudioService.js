@@ -1,34 +1,29 @@
 /**
- * AudioService — low-level wrapper around expo-audio's createAudioPlayer.
+ * AudioService — singleton expo-audio player wrapper.
  *
- * This module is intentionally NOT a React hook.  It manages a single
- * shared AudioPlayer instance that lives in AudioContext and persists
- * across screen navigation.  UI components interact with it only through
- * AudioContext / useAudio hook, never directly.
+ * Owns one shared AudioPlayer for the entire app lifetime.
+ * Navigation between screens never creates a second player.
+ * All UI interacts through AudioContext, never directly here.
  *
- * expo-audio reference:
- *   player.play()           – start / resume
- *   player.pause()          – pause
- *   player.seekTo(seconds)  – seek
- *   player.replace(source)  – swap source without creating a new player
- *   player.currentTime      – seconds (read)
- *   player.duration         – seconds (read)
- *   player.isLoaded         – boolean
- *   player.isBuffering      – boolean
- *   player.playing          – boolean
+ * expo-audio API (v57):
+ *   player.play()                          start / resume
+ *   player.pause()                         pause
+ *   player.replace(source)                 swap source, keeps player alive
+ *   player.seekTo(seconds)                 seek
+ *   player.setPlaybackRate(rate, quality)  change playback speed
+ *   player.playbackRate                    current rate (read)
+ *   player.currentTime                     seconds (read)
+ *   player.duration                        seconds (read)
+ *   player.playing                         boolean (read)
+ *   player.isBuffering                     boolean (read)
+ *   player.isLoaded                        boolean (read)
  */
 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 
-// One player for the entire application lifetime.
 let _player = null;
 
-/**
- * Returns the shared AudioPlayer, creating it if necessary.
- * The player starts with no source — call loadSource() to set one.
- *
- * @returns {import('expo-audio').AudioPlayer}
- */
+/** Returns the shared player, creating it on first call. */
 export function getPlayer() {
   if (!_player) {
     _player = createAudioPlayer(null);
@@ -36,28 +31,18 @@ export function getPlayer() {
   return _player;
 }
 
-/**
- * Configures the audio session for foreground playback.
- * Call once during app initialisation.
- */
+/** Configure audio session — call once at app start. */
 export async function configureAudioSession() {
   try {
-    await setAudioModeAsync({
-      playsInSilentMode: true,
-      // Background audio and lock-screen controls are out-of-scope
-      // for the first release.  Set shouldPlayInBackground = false
-      // (the default) intentionally.
-    });
+    await setAudioModeAsync({ playsInSilentMode: true });
   } catch (err) {
     console.warn('[AudioService] configureAudioSession failed:', err);
   }
 }
 
 /**
- * Loads a new audio source into the shared player.
- * Stops the current playback first.
- *
- * @param {number|string|object} source  – A require() asset or URI string.
+ * Load a new source into the shared player.
+ * Uses player.replace() to swap without destroying the player instance.
  */
 export function loadSource(source) {
   const player = getPlayer();
@@ -69,29 +54,24 @@ export function loadSource(source) {
   }
 }
 
-/** Play or resume. */
-export function play() {
-  getPlayer().play();
-}
+export function play()  { getPlayer().play();  }
+export function pause() { getPlayer().pause(); }
 
-/** Pause. */
-export function pause() {
-  getPlayer().pause();
-}
-
-/**
- * Seek to a position.
- * @param {number} seconds
- */
 export async function seekTo(seconds) {
   await getPlayer().seekTo(seconds);
 }
 
-/**
- * Stop and reset to the beginning without unloading.
- */
 export async function stop() {
-  const player = getPlayer();
-  player.pause();
-  await player.seekTo(0);
+  const p = getPlayer();
+  p.pause();
+  await p.seekTo(0);
+}
+
+/**
+ * Set playback rate with automatic pitch correction.
+ * @param {number} rate  0.75 | 1 | 1.25 | 1.5 | 1.75 | 2
+ */
+export function setRate(rate) {
+  // 'medium' pitch correction preserves speech quality at higher rates.
+  getPlayer().setPlaybackRate(rate, 'medium');
 }
