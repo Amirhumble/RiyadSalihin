@@ -14,12 +14,12 @@
 import { useRouter } from 'expo-router';
 import { memo, useCallback } from 'react';
 import {
-  FlatList,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    FlatList,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -155,7 +155,6 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
   const duration   = fmtMs(audio.duration_ms);
   const position   = fmtSec((audio.position_ms ?? 0) / 1000);
   const totalDur   = fmtMs(audio.duration_ms);
-
   return (
     <TouchableOpacity
       style={[styles.row, isActive && styles.rowActive]}
@@ -188,26 +187,23 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
 
         {/* Meta: duration / resume / completed */}
         <View style={styles.meta}>
-          {duration ? (
+          {/* Unstarted or no position: show duration alone */}
+          {!inProgress && !isCompleted && duration ? (
             <Text style={styles.metaText}>{duration}</Text>
           ) : null}
 
+          {/* In progress: "Continue · pos / total" */}
           {inProgress && (
-            <>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={[styles.metaText, styles.resumeText]}>
-                {totalDur
-                  ? `Continue · ${position} / ${totalDur}`
-                  : `Continue · ${position}`}
-              </Text>
-            </>
+            <Text style={[styles.metaText, styles.resumeText]} numberOfLines={1}>
+              {`Continue · ${position}${totalDur ? ` / ${totalDur}` : ''}`}
+            </Text>
           )}
 
+          {/* Completed: "✓ Completed · total" */}
           {isCompleted && (
-            <>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={[styles.metaText, styles.completedText]}>✓ Completed</Text>
-            </>
+            <Text style={[styles.metaText, styles.completedText]} numberOfLines={1}>
+              {`✓ Completed${totalDur ? ` · ${totalDur}` : ''}`}
+            </Text>
           )}
         </View>
 
@@ -395,8 +391,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   metaDot: { fontSize: 11, color: colors.borderLight },
-  resumeText: { color: colors.primary, fontWeight: '500' },
-  completedText: { color: colors.success, fontWeight: '500' },
+  resumeText: { color: colors.primary, fontWeight: '500' },  completedText: { color: colors.success, fontWeight: '500' },
 
   // Progress bar
   progressTrack: {
