@@ -1,7 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
 import { syncAudioContent } from './audioImporter';
-import { runDevSeed } from './devSeed';
 import { up as migration001 } from './migrations/001_initial';
 import { up as migration002 } from './migrations/002_add_pdf_page';
 import { up as migration003 } from './migrations/003_audio_chapter_range';
@@ -28,7 +27,7 @@ export function getDatabase() {
   return _db;
 }
 
-// Open DB, run migrations, seed (dev), sync audio content from content/*.js
+// Open DB → migrations → sync lesson list from content/audios.js
 export async function initDatabase() {
   if (_db) return;
 
@@ -37,10 +36,6 @@ export async function initDatabase() {
   await _db.execAsync('PRAGMA foreign_keys = ON;');
 
   await runMigrations(_db);
-
-  if (__DEV__) {
-    await runDevSeed(_db);
-  }
 
   // Upserts lesson metadata; never overwrites position_ms (user progress)
   await syncAudioContent(_db);
