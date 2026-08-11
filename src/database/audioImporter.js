@@ -31,10 +31,15 @@
  * For normal hadiths: 1 ≤ from ≤ to.
  */
 
-import { getDatabase } from './database';
+// getDatabase is loaded lazily inside importAudioContent() to avoid a
+// circular dependency: database.js → audioImporter.js → database.js.
+// syncAudioContent(db) receives the db handle directly and never needs it.
+function _getDb() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('./database').getDatabase();
+}
 
 // ─── Validation ───────────────────────────────────────────────────────────────
-
 /**
  * Validates a single audio record's hadith range.
  * Throws with a clear message on any violation.
@@ -211,7 +216,7 @@ export async function importAudioContent({ audios, audioLinks }) {
     return { audiosInserted: 0, audiosSkipped: 0, linksInserted: 0, linksSkipped: 0 };
   }
 
-  const db = getDatabase();
+  const db = _getDb();
   let audiosInserted = 0, audiosSkipped = 0, linksInserted = 0, linksSkipped = 0;
 
   await db.withTransactionAsync(async () => {

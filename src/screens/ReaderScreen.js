@@ -5,39 +5,34 @@
  *
  * PDF PERFORMANCE
  * ───────────────
- * The PDF is a single bundled file. Its asset resolution (expo-asset) is
- * done once and the resulting URI is cached in a module-level variable so
- * switching audio tracks does NOT re-resolve or re-mount the PDF.
- *
- * The <Pdf> component remains mounted throughout the screen's lifetime.
- * When a different audio is opened its page is set via pdfRef.setPage()
- * rather than re-mounting the component.
+ * PDF asset URI is cached at module level (_cachedPdfUri). Switching
+ * audio tracks does NOT re-resolve or re-mount the PDF.
  *
  * AUDIO PERFORMANCE
  * ─────────────────
- * PlayerBar uses useAudioPlayer() which subscribes to high-frequency
- * status updates. The rest of ReaderScreen uses stable context only and
- * does NOT re-render on playback ticks.
+ * PlayerBar is memo-wrapped and uses useAudioPlayer() (high-frequency).
+ * ReaderScreen itself uses only stable context — no re-renders on ticks.
  */
 
 import { Asset } from 'expo-asset';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Modal,
+    PanResponder,
+    Pressable,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -48,9 +43,12 @@ import { getAudioByIdWithChapterInfo } from '@/database/repositories/audioReposi
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// ── PDF asset — cached at module level to avoid repeat resolution ─────────────
+
+
+
+// ── PDF asset — cached at module level ───────────────────────────────────────
 const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
-let _cachedPdfUri = null; // set once, reused forever
+let _cachedPdfUri = null;
 
 // Lazy-load react-native-pdf
 let Pdf = null;
@@ -61,17 +59,24 @@ try {
   pdfModuleError = err;
 }
 
-// ── Playback speed options ────────────────────────────────────────────────────
-const SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+// ── Speed options ─────────────────────────────────────────────────────────────
+const SPEED_OPTIONS = [
+  { rate: 0.75, label: '0.75×' },
+  { rate: 1,    label: '1×',    note: 'Normal' },
+  { rate: 1.25, label: '1.25×' },
+  { rate: 1.5,  label: '1.5×' },
+  { rate: 1.75, label: '1.75×' },
+  { rate: 2,    label: '2×' },
+];
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function fmt(sec) {
-  if (!sec || isNaN(sec) || sec < 0) return '0:00';
+  if (!sec || !isFinite(sec) || sec < 0) return '0:00';
   const s = Math.floor(sec);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// ── Screen ────────────────────────────────────────────────────────────────────
+// ── ReaderScreen ──────────────────────────────────────────────────────────────
 
 export default function ReaderScreen() {
   const router      = useRouter();
@@ -79,7 +84,6 @@ export default function ReaderScreen() {
   const { audioId } = useLocalSearchParams();
   const id          = Number(audioId);
 
-  // Audio DB record
   const { data: audio, loading: audioLoading, error: audioDbError } =
     useDbQuery(() => getAudioByIdWithChapterInfo(id), [id]);
 
@@ -91,13 +95,12 @@ export default function ReaderScreen() {
   const [currentPage,  setCurrentPage]  = useState(1);
   const [totalPages,   setTotalPages]   = useState(0);
 
-  const pdfRef  = useRef(null);
+  const pdfRef   = useRef(null);
   const audioRef = useRef(null);
   useEffect(() => { audioRef.current = audio; }, [audio]);
 
-  // Resolve PDF once — uses module-level cache so switching tracks is free
+  // Resolve PDF once; cache URI for future visits
   const resolvePdf = useCallback(async (cancelRef) => {
-    // Already resolved from a previous screen visit
     if (_cachedPdfUri) {
       setPdfUri(_cachedPdfUri);
       setPdfResolving(false);
@@ -111,7 +114,7 @@ export default function ReaderScreen() {
       await asset.downloadAsync();
       if (cancelRef?.current) return;
       if (!asset.localUri) throw new Error('PDF could not be prepared.');
-      _cachedPdfUri = asset.localUri; // cache for future visits
+      _cachedPdfUri = asset.localUri;
       setPdfUri(asset.localUri);
       setPdfRendering(true);
     } catch (err) {
@@ -142,16 +145,11 @@ export default function ReaderScreen() {
   const handlePdfLoadComplete = useCallback((pages) => {
     setTotalPages(pages);
     setPdfRendering(false);
-
     const raw    = audioRef.current?.pdf_page;
     const target = (raw != null && Number.isInteger(raw) && raw >= 1)
-      ? Math.max(1, Math.min(raw, pages))
-      : 1;
-
+      ? Math.max(1, Math.min(raw, pages)) : 1;
     setCurrentPage(target);
-    if (target > 1) {
-      setTimeout(() => pdfRef.current?.setPage(target), 100);
-    }
+    if (target > 1) setTimeout(() => pdfRef.current?.setPage(target), 100);
   }, []);
 
   const handlePdfPageChanged = useCallback((page) => setCurrentPage(page), []);
@@ -164,11 +162,10 @@ export default function ReaderScreen() {
 
   const isLoading = audioLoading || pdfResolving;
 
-  // ── Render ────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
 
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────────────── */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity
@@ -193,14 +190,14 @@ export default function ReaderScreen() {
           </View>
 
           <View style={styles.headerRight}>
-            {totalPages > 0 ? (
-              <Text style={styles.pageCounter}>{currentPage} / {totalPages}</Text>
-            ) : <View style={styles.headerRight} />}
+            {totalPages > 0
+              ? <Text style={styles.pageCounter}>{currentPage} / {totalPages}</Text>
+              : <View style={styles.headerRight} />}
           </View>
         </View>
       </SafeAreaView>
 
-      {/* PDF */}
+      {/* ── PDF area ───────────────────────────────────────────── */}
       <View style={styles.pdfArea}>
         {(isLoading || pdfRendering) && !pdfError && (
           <View style={styles.loadingOverlay}>
@@ -214,7 +211,11 @@ export default function ReaderScreen() {
         {pdfError ? (
           <PdfErrorView
             error={pdfError}
-            onRetry={() => { setPdfUri(null); _cachedPdfUri = null; resolvePdf({ current: false }); }}
+            onRetry={() => {
+              setPdfUri(null);
+              _cachedPdfUri = null;
+              resolvePdf({ current: false });
+            }}
           />
         ) : Pdf && pdfUri ? (
           <Pdf
@@ -232,7 +233,7 @@ export default function ReaderScreen() {
         ) : null}
       </View>
 
-      {/* Player */}
+      {/* ── Audio player ───────────────────────────────────────── */}
       <View style={[styles.playerBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
         {audioDbError ? (
           <View style={styles.playerMessage}>
@@ -251,8 +252,8 @@ export default function ReaderScreen() {
 }
 
 // ── PlayerBar ─────────────────────────────────────────────────────────────────
-// Uses useAudioPlayer() which re-renders on every status tick.
-// Isolated here so ReaderScreen itself does not re-render.
+// memo: re-renders on every status tick but does NOT propagate upward.
+// The PDF section and ReaderScreen shell remain completely stable.
 
 const PlayerBar = memo(function PlayerBar({ audio }) {
   const {
@@ -268,8 +269,73 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   const buffering = isThis && (isBuffering || audioLoading);
   const time      = isThis ? currentTime : 0;
   const dur       = isThis ? duration    : 0;
-  const progress  = isThis && dur > 0 ? Math.min(time / dur, 1) : 0;
   const trackW    = useRef(0);
+
+  // ── Drag-seek state ───────────────────────────────────────────────
+  // isSeeking: true while the user's finger is on the track.
+  // When true, displayRatio comes from the finger, NOT from the player.
+  // This prevents the player's periodic status updates from fighting
+  // with the user's finger position.
+  const [isSeeking,    setIsSeeking]    = useState(false);
+  const [seekRatio,    setSeekRatio]    = useState(0);
+
+  // Derived display values — finger position wins while dragging
+  const displayRatio = isSeeking ? seekRatio
+    : (dur > 0 ? Math.min(time / dur, 1) : 0);
+  const displayTime  = isSeeking ? seekRatio * dur : time;
+
+  // Convert an x offset (relative to the track container) to a clamped ratio
+  function xToRatio(x) {
+    if (!trackW.current || trackW.current <= 0) return 0;
+    return Math.max(0, Math.min(x / trackW.current, 1));
+  }
+
+  // ── PanResponder for the seek track ───────────────────────────────
+  // We use PanResponder (built-in, no extra dependency) to handle press,
+  // drag, and release on the progress track.
+  //
+  //  onStartShouldSetPanResponder  — claim every touch on the track
+  //  onPanResponderGrant           — finger down: enter seeking state
+  //  onPanResponderMove            — finger moving: update visual position
+  //  onPanResponderRelease         — finger up: seek player, exit seeking
+  //  onPanResponderTerminate       — interrupted (e.g. incoming call): same as release
+  //
+  // seekRef / durRef hold the latest seek/dur values so the PanResponder
+  // (created once) always acts on current data without being recreated.
+  const seekRef = useRef(seek);
+  const durRef  = useRef(dur);
+  useEffect(() => { seekRef.current = seek; }, [seek]);
+  useEffect(() => { durRef.current  = dur;  }, [dur]);
+
+  const stablePan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+
+      onPanResponderGrant: (evt) => {
+        const ratio = xToRatio(evt.nativeEvent.locationX);
+        setIsSeeking(true);
+        setSeekRatio(ratio);
+      },
+
+      onPanResponderMove: (evt) => {
+        const ratio = xToRatio(evt.nativeEvent.locationX);
+        setSeekRatio(ratio);
+      },
+
+      onPanResponderRelease: (evt) => {
+        const ratio = xToRatio(evt.nativeEvent.locationX);
+        setIsSeeking(false);
+        if (durRef.current > 0) seekRef.current(ratio * durRef.current);
+      },
+
+      onPanResponderTerminate: (evt) => {
+        const ratio = xToRatio(evt.nativeEvent.locationX);
+        setIsSeeking(false);
+        if (durRef.current > 0) seekRef.current(ratio * durRef.current);
+      },
+    })
+  ).current;
 
   const [speedOpen, setSpeedOpen] = useState(false);
 
@@ -279,11 +345,6 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
     else if (playing) pause();
     else              play();
   }, [isThis, playing, audio, loadAudio, play, pause, clearAudioError]);
-
-  const handleSeek = useCallback((e) => {
-    if (!isThis || dur <= 0 || trackW.current <= 0) return;
-    seek((e.nativeEvent.locationX / trackW.current) * dur);
-  }, [isThis, dur, seek]);
 
   const skip = useCallback((delta) => {
     if (!isThis) return;
@@ -296,106 +357,158 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   }, [setSpeed]);
 
   const speedLabel = useMemo(
-    () => (playbackRate === 1 ? '1×' : `${playbackRate}×`),
+    () => playbackRate === 1 ? '1×' : `${playbackRate}×`,
     [playbackRate]
   );
 
+  const rangeLabel = formatHadithRange(
+    audio?.hadith_number_from,
+    audio?.hadith_number_to
+  );
+
+  const timeStr = fmt(displayTime);
+  const durStr  = dur > 0 ? fmt(dur) : '--:--';
+  const pct     = `${Math.round(displayRatio * 100)}%`;
+
+  // Accessibility value — human-readable position string
+  const accessValue = useMemo(() => {
+    const nowSec = Math.round(displayTime);
+    const maxSec = Math.round(dur);
+    const nowMin = Math.floor(nowSec / 60);
+    const nowRem = nowSec % 60;
+    const maxMin = Math.floor(maxSec / 60);
+    const maxRem = maxSec % 60;
+    const nowStr = nowMin > 0
+      ? `${nowMin} minute${nowMin !== 1 ? 's' : ''} ${nowRem} second${nowRem !== 1 ? 's' : ''}`
+      : `${nowSec} second${nowSec !== 1 ? 's' : ''}`;
+    const maxStr = maxSec > 0
+      ? (maxMin > 0
+        ? `${maxMin} minute${maxMin !== 1 ? 's' : ''} ${maxRem} second${maxRem !== 1 ? 's' : ''}`
+        : `${maxSec} second${maxSec !== 1 ? 's' : ''}`)
+      : 'unknown duration';
+    return {
+      min:  0,
+      max:  Math.round(dur),
+      now:  nowSec,
+      text: `${nowStr} of ${maxStr}`,
+    };
+  }, [displayTime, dur]);
+
   return (
     <View style={pl.container}>
-      {/* Title */}
-      <Text style={pl.title} numberOfLines={1}>{audio?.title ?? ''}</Text>
+
+      {/* Track info */}
+      <View style={pl.trackInfo}>
+        <Text style={pl.trackTitle} numberOfLines={1}>{audio?.title ?? ''}</Text>
+        {rangeLabel ? (
+          <Text style={pl.trackRange} numberOfLines={1}>{rangeLabel}</Text>
+        ) : null}
+      </View>
 
       {/* Error */}
-      {isThis && audioError && (
+      {isThis && audioError ? (
         <Text style={pl.errorText} numberOfLines={1}>
-          Audio is currently unavailable. Please try again.
+          Audio is currently unavailable.
         </Text>
-      )}
+      ) : null}
 
-      {/* Controls row: –10 / Play / +10 / Speed */}
+      {/* Time row — above progress bar */}
+      <View style={pl.timeRow}>
+        <Text style={pl.timeText}>{timeStr}</Text>
+        <Text style={pl.timeText}>{durStr}</Text>
+      </View>
+
+      {/* ── Draggable seek bar ─────────────────────────────────────
+          The outer View measures track width via onLayout.
+          stablePan.panHandlers covers the entire 44px-tall touch area.
+          The visual track (4px) is rendered inside; the thumb sits on top.
+      */}
+      <View
+        style={pl.trackWrap}
+        onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Audio progress"
+        accessibilityValue={accessValue}
+        {...stablePan.panHandlers}
+      >
+        {/* Track background */}
+        <View style={pl.trackBg}>
+          <View style={[pl.trackFill, { width: pct }]} />
+        </View>
+        {/* Thumb — slightly larger while dragging for visual feedback */}
+        <View style={[pl.thumb, { left: pct }, isSeeking && pl.thumbDragging]} />
+      </View>
+
+      {/* Controls row */}
       <View style={pl.controls}>
+
+        {/* Rewind 10s */}
         <TouchableOpacity
           style={pl.skipBtn}
           onPress={() => skip(-10)}
-          activeOpacity={0.7}
+          activeOpacity={0.65}
           accessibilityLabel="Rewind 10 seconds"
           accessibilityRole="button"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={pl.skipIcon}>↺</Text>
-          <Text style={pl.skipLabel}>10</Text>
+          <View style={pl.skipInner}>
+            <Text style={pl.skipArrow}>↺</Text>
+            <Text style={pl.skipNum}>10</Text>
+          </View>
         </TouchableOpacity>
 
+        {/* Play / Pause */}
         <TouchableOpacity
           style={pl.playBtn}
           onPress={handlePlayPause}
-          activeOpacity={0.8}
+          activeOpacity={0.75}
           accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}
           accessibilityRole="button"
           accessibilityState={{ busy: buffering }}
         >
           {buffering
-            ? <ActivityIndicator color={colors.heroText} size="small" />
+            ? <ActivityIndicator color={colors.hero} size="small" />
             : <Text style={pl.playIcon}>{playing ? '⏸' : '▶'}</Text>
           }
         </TouchableOpacity>
 
+        {/* Forward 10s */}
         <TouchableOpacity
           style={pl.skipBtn}
           onPress={() => skip(10)}
-          activeOpacity={0.7}
+          activeOpacity={0.65}
           accessibilityLabel="Skip forward 10 seconds"
           accessibilityRole="button"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={pl.skipLabel}>10</Text>
-          <Text style={pl.skipIcon}>↻</Text>
+          <View style={pl.skipInner}>
+            <Text style={pl.skipNum}>10</Text>
+            <Text style={pl.skipArrow}>↻</Text>
+          </View>
         </TouchableOpacity>
+      </View>
 
-        {/* Speed button */}
+      {/* Speed button — centred below controls */}
+      <View style={pl.speedRow}>
         <TouchableOpacity
           style={pl.speedBtn}
           onPress={() => setSpeedOpen(true)}
-          activeOpacity={0.75}
-          accessibilityLabel={`Playback speed: ${speedLabel}`}
+          activeOpacity={0.7}
+          accessibilityLabel={`Playback speed, currently ${speedLabel}`}
           accessibilityRole="button"
         >
           <Text style={pl.speedLabel}>{speedLabel}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Progress bar + times */}
-      <View style={pl.progressWrap}>
-        <View
-          style={pl.track}
-          onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
-        >
-          <TouchableOpacity
-            style={pl.trackTouchTarget}
-            onPress={handleSeek}
-            activeOpacity={1}
-            accessibilityRole="adjustable"
-            accessibilityLabel="Seek audio position"
-            accessibilityValue={{ now: Math.round(time), min: 0, max: Math.round(dur) }}
-          />
-          <View style={[pl.fill, { width: `${Math.round(progress * 100)}%` }]} />
-          <View style={[pl.thumb, { left: `${Math.round(progress * 100)}%` }]} />
-        </View>
-
-        <View style={pl.times}>
-          <Text style={pl.timeText}>{fmt(time)}</Text>
-          <Text style={pl.timeText}>{dur > 0 ? fmt(dur) : '--:--'}</Text>
-        </View>
-      </View>
-
-      {/* DEV overlay */}
+      {/* DEV only */}
       {__DEV__ && isThis && (
         <Text style={pl.devText} numberOfLines={1}>
-          {`DEV  ${audio?.filename}  ${playing ? '▶' : '⏸'}  ${fmt(time)}/${fmt(dur)}  ${playbackRate}×`}
+          {`DEV ${audio?.filename}  ${playing ? '▶' : '⏸'}  ${timeStr}/${durStr}  ${playbackRate}×${isSeeking ? '  [drag]' : ''}`}
         </Text>
       )}
 
-      {/* Speed selector sheet */}
+      {/* Speed sheet */}
       <SpeedSheet
         visible={speedOpen}
         current={playbackRate}
@@ -420,23 +533,27 @@ const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClos
       <Pressable style={sp.backdrop} onPress={onClose} />
       <View style={sp.sheet}>
         <View style={sp.handle} />
-        <Text style={sp.sheetTitle}>Playback Speed</Text>
-        {SPEED_OPTIONS.map((rate) => (
-          <TouchableOpacity
-            key={rate}
-            style={[sp.option, current === rate && sp.optionActive]}
-            onPress={() => onSelect(rate)}
-            activeOpacity={0.75}
-            accessibilityRole="radio"
-            accessibilityLabel={`${rate}×`}
-            accessibilityState={{ selected: current === rate }}
-          >
-            <Text style={[sp.optionText, current === rate && sp.optionTextActive]}>
-              {rate === 1 ? '1×  (Normal)' : `${rate}×`}
-            </Text>
-            {current === rate && <Text style={sp.check}>✓</Text>}
-          </TouchableOpacity>
-        ))}
+        <Text style={sp.title}>Playback Speed</Text>
+        {SPEED_OPTIONS.map(({ rate, label, note }) => {
+          const active = current === rate;
+          return (
+            <TouchableOpacity
+              key={rate}
+              style={[sp.option, active && sp.optionActive]}
+              onPress={() => onSelect(rate)}
+              activeOpacity={0.7}
+              accessibilityRole="radio"
+              accessibilityLabel={note ? `${label}, ${note}` : label}
+              accessibilityState={{ selected: active }}
+            >
+              <Text style={[sp.optionLabel, active && sp.optionLabelActive]}>
+                {label}
+                {note ? <Text style={sp.optionNote}>  {note}</Text> : null}
+              </Text>
+              {active && <Text style={sp.check}>✓</Text>}
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </Modal>
   );
@@ -454,7 +571,9 @@ function PdfErrorView({ error, onRetry }) {
         {isNative ? 'PDF viewer is not available' : 'Could not open the book'}
       </Text>
       <Text style={styles.pdfErrorBody}>
-        {isNative ? 'Please rebuild the development client.' : 'The file could not be read. Please try again.'}
+        {isNative
+          ? 'Please rebuild the development client.'
+          : 'The file could not be read. Please try again.'}
       </Text>
       {!isNative && onRetry && (
         <TouchableOpacity
@@ -471,7 +590,7 @@ function PdfErrorView({ error, onRetry }) {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ── Screen styles ─────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.backgroundSecondary },
@@ -538,35 +657,31 @@ const styles = StyleSheet.create({
   },
   pdfErrorIcon:  { fontSize: 40, marginBottom: spacing.md },
   pdfErrorTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
+    fontSize: 17, fontWeight: '600', color: colors.text,
+    textAlign: 'center', marginBottom: spacing.sm,
   },
   pdfErrorBody: {
-    fontSize: 13,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: spacing.lg,
+    fontSize: 13, color: colors.textMuted,
+    textAlign: 'center', lineHeight: 20, marginBottom: spacing.lg,
   },
   pdfRetryBtn: {
     backgroundColor: colors.primary,
     borderRadius: 10,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   pdfRetryText: { color: colors.textInverse, fontSize: 15, fontWeight: '600' },
 
-  // Player bar
+  // Player bar wrapper
   playerBar: {
     backgroundColor: colors.hero,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
   },
   playerMessage: {
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 44,
@@ -574,16 +689,32 @@ const styles = StyleSheet.create({
   playerMessageText: { fontSize: 13, color: colors.heroSubtext, textAlign: 'center' },
 });
 
-const pl = StyleSheet.create({
-  container: { paddingBottom: spacing.xs },
+// ── Player styles ─────────────────────────────────────────────────────────────
 
-  title: {
-    fontSize: 13,
-    fontWeight: '600',
+const pl = StyleSheet.create({
+  container: {
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
+
+  // Track info
+  trackInfo: {
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  trackTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.heroText,
+    textAlign: 'center',
+    letterSpacing: 0.1,
+  },
+  trackRange: {
+    fontSize: 11,
     color: colors.heroSubtext,
     textAlign: 'center',
-    marginBottom: spacing.sm,
-    letterSpacing: 0.2,
+    marginTop: 2,
   },
 
   errorText: {
@@ -593,95 +724,137 @@ const pl = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
-  // Controls
-  controls: {
+  // Time row — sits just above the progress bar
+  timeRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.lg,
-    marginBottom: spacing.sm,
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+    marginBottom: 6,
   },
-  skipBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    minWidth: 48,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  skipIcon:  { fontSize: 20, color: colors.heroSubtext },
-  skipLabel: { fontSize: 12, color: colors.heroSubtext, fontVariant: ['tabular-nums'] },
-
-  playBtn: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playIcon: { fontSize: 28, color: colors.heroText, marginLeft: 3 },
-
-  // Speed button
-  speedBtn: {
-    minWidth: 44,
-    minHeight: 44,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  speedLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.heroText,
-    letterSpacing: 0.3,
-  },
-
-  // Progress
-  progressWrap: { gap: spacing.xs },
-  track: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    overflow: 'visible',
-    position: 'relative',
-  },
-  trackTouchTarget: {
-    ...StyleSheet.absoluteFillObject,
-    top: -14,
-    bottom: -14,
-  },
-  fill: {
-    position: 'absolute',
-    top: 0, left: 0, bottom: 0,
-    backgroundColor: colors.gold,
-    borderRadius: 3,
-  },
-  thumb: {
-    position: 'absolute',
-    top: -5,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.gold,
-    marginLeft: -8,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.25,
-    shadowRadius: 2,
-  },
-  times: { flexDirection: 'row', justifyContent: 'space-between' },
   timeText: {
     fontSize: 11,
     color: colors.heroSubtext,
     fontVariant: ['tabular-nums'],
+  },
+
+  // Progress bar — PanResponder covers the full trackWrap height
+  trackWrap: {
+    height: 44,           // full 44px touch target (visual track is 4px inside)
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+    position: 'relative',
+  },
+  trackBg: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    overflow: 'hidden',
+  },
+  trackFill: {
+    height: '100%',
+    backgroundColor: colors.gold,
+    borderRadius: 2,
+  },
+  thumb: {
+    position: 'absolute',
+    top: '50%',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.gold,
+    marginTop: -8,
+    marginLeft: -8,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  // Thumb grows slightly while the user is actively dragging
+  thumbDragging: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    marginTop: -11,
+    marginLeft: -11,
+    elevation: 8,
+  },
+
+  // Controls row
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xl + spacing.md,
+    marginBottom: spacing.sm,
+  },
+
+  // Skip buttons
+  skipBtn: {
+    minWidth: 52,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  skipArrow: {
+    fontSize: 22,
+    color: colors.heroSubtext,
+    lineHeight: 26,
+  },
+  skipNum: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.heroSubtext,
+    fontVariant: ['tabular-nums'],
+  },
+
+  // Play / Pause button — primary action
+  playBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.heroText,   // white circle on dark background
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  playIcon: {
+    fontSize: 28,
+    color: colors.hero,                 // dark blue icon on white circle
+    marginLeft: 3,                      // optical centering for ▶
+  },
+
+  // Speed row
+  speedRow: {
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  speedBtn: {
+    minWidth: 52,
+    minHeight: 32,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.heroSubtext,
+    letterSpacing: 0.4,
   },
 
   devText: {
@@ -692,6 +865,8 @@ const pl = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+// ── Speed sheet styles ────────────────────────────────────────────────────────
 
 const sp = StyleSheet.create({
   backdrop: {
@@ -718,7 +893,7 @@ const sp = StyleSheet.create({
     backgroundColor: colors.borderLight,
     marginBottom: spacing.md,
   },
-  sheetTitle: {
+  title: {
     fontSize: 15,
     fontWeight: '700',
     color: colors.text,
@@ -729,24 +904,30 @@ const sp = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.md - 2,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.sm,
     borderRadius: 10,
     marginBottom: 2,
+    minHeight: 48,
   },
   optionActive: {
     backgroundColor: colors.primaryLight,
   },
-  optionText: {
+  optionLabel: {
     fontSize: 16,
     color: colors.text,
   },
-  optionTextActive: {
+  optionLabelActive: {
     color: colors.primary,
     fontWeight: '600',
   },
+  optionNote: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '400',
+  },
   check: {
-    fontSize: 15,
+    fontSize: 16,
     color: colors.primary,
     fontWeight: '700',
   },
