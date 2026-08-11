@@ -2,11 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 
 import { initDatabase } from '@/database/database';
 
-/**
- * DB_STATUS mirrors the lifecycle of the database initialisation call.
- * Screens can gate rendering on this value without coupling themselves
- * to SQLite directly.
- */
 export const DB_STATUS = {
   IDLE: 'idle',
   LOADING: 'loading',
@@ -33,19 +28,14 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  // Run once on mount.
   useEffect(() => {
     initializeApp();
   }, [initializeApp]);
 
   const value = {
-    /** Current database status — use DB_STATUS constants to compare. */
     dbStatus,
-    /** The Error object if dbStatus === DB_STATUS.ERROR, otherwise null. */
     dbError,
-    /** Whether the database is open and ready for queries. */
     isDbReady: dbStatus === DB_STATUS.READY,
-    /** Retry initialization after an error. */
     retryInit: initializeApp,
   };
 

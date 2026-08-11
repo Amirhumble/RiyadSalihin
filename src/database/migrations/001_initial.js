@@ -1,24 +1,8 @@
-/**
- * Migration 001 – initial schema
- *
- * Relationship model:
- *   Chapter (1) ──< Hadith (many)
- *   Audio   (1) ──< hadith_audio (many) >── Hadith
- *
- * One audio file can cover multiple hadiths (e.g. a short chapter recited
- * as a single track).  hadith_audio is the join table.
- *
- * The audios table stores only the local filename / asset identifier so the
- * app never embeds absolute paths.  Playback position and duration are
- * nullable so they can be populated lazily at runtime.
- */
-
+// Creates chapters, hadiths, audios, hadith_audio, bookmarks.
 export const version = 1;
 export const description = 'Initial schema: chapters, hadiths, audios, bookmarks';
 
-/** @param {import('expo-sqlite').SQLiteDatabase} db */
 export async function up(db) {
-  // ── chapters ────────────────────────────────────────────────────────────
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS chapters (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +14,6 @@ export async function up(db) {
     CREATE INDEX IF NOT EXISTS idx_chapters_ordering ON chapters (ordering);
   `);
 
-  // ── hadiths ─────────────────────────────────────────────────────────────
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS hadiths (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,14 +28,6 @@ export async function up(db) {
     CREATE INDEX IF NOT EXISTS idx_hadiths_ordering    ON hadiths (ordering);
   `);
 
-  // ── audios ───────────────────────────────────────────────────────────────
-  // filename: the bare filename stored in assets/audio/ (e.g. "001.mp3").
-  //           Never store absolute paths — the app reconstructs the full
-  //           URI at runtime using Asset.fromModule() or a known prefix.
-  // duration_ms: nullable; populated when the player loads the file.
-  // position_ms: last-known playback position for resume support.
-  // chapter_id: optional — lets you query all tracks for a chapter without
-  //             going through hadith_audio when a whole chapter is one track.
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS audios (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +43,6 @@ export async function up(db) {
     CREATE INDEX IF NOT EXISTS idx_audios_ordering    ON audios (ordering);
   `);
 
-  // ── hadith_audio (join table) ─────────────────────────────────────────
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS hadith_audio (
       hadith_id  INTEGER NOT NULL,
@@ -80,7 +54,6 @@ export async function up(db) {
     CREATE INDEX IF NOT EXISTS idx_hadith_audio_audio_id ON hadith_audio (audio_id);
   `);
 
-  // ── bookmarks ────────────────────────────────────────────────────────────
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS bookmarks (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,

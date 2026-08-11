@@ -1,25 +1,12 @@
-/**
- * AudioListScreen — main screen of the application.
- *
- * PERFORMANCE
- * ───────────
- * AudioRow is wrapped in React.memo. It only re-renders when its own
- * `audio` prop or the active/playing state changes — NOT on every
- * playback tick. This keeps 50+ rows performant during audio playback.
- *
- * useAudio() only returns stable context + isPlaying (not currentTime),
- * so row re-renders are limited to track-switch and play/pause events.
- */
-
 import { useRouter } from 'expo-router';
 import { memo, useCallback } from 'react';
 import {
-    FlatList,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -28,11 +15,9 @@ import ScreenLoader from '@/components/common/ScreenLoader';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
-import { getAllAudiosWithChapterInfo } from '@/database/repositories/audioRepository';
+import { getAllAudios } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtMs(ms) {
   if (!ms || ms <= 0) return null;
@@ -45,29 +30,28 @@ function fmtSec(sec) {
   return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 }
 
-// ── Screen ────────────────────────────────────────────────────────────────────
-
 export default function AudioListScreen() {
   const router = useRouter();
 
   const { data: audios, loading, error, refetch } = useDbQuery(
-    () => getAllAudiosWithChapterInfo(),
+    () => getAllAudios(),
     []
   );
 
-  // Stable callback — does not change identity on re-render
   const handlePress = useCallback(
     (audioId) => router.push(`/reader?audioId=${audioId}`),
     [router]
   );
 
   if (loading) return <ScreenLoader message="Loading lessons…" />;
-  if (error)   return (
-    <ScreenError
-      message="Something went wrong while loading the lessons."
-      onRetry={refetch}
-    />
-  );
+  if (error) {
+    return (
+      <ScreenError
+        message="Something went wrong while loading the lessons."
+        onRetry={refetch}
+      />
+    );
+  }
 
   const count = audios?.length ?? 0;
 
@@ -75,7 +59,6 @@ export default function AudioListScreen() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
-      {/* Header */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
           <View style={styles.headerGoldRule} />
@@ -90,10 +73,9 @@ export default function AudioListScreen() {
         </View>
       </SafeAreaView>
 
-      {/* List */}
       <FlatList
         data={audios}
-        keyExtractor={keyExtractor}
+        keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
           <AudioRow audio={item} onPress={handlePress} />
         )}
@@ -101,7 +83,6 @@ export default function AudioListScreen() {
         contentContainerStyle={count === 0 ? styles.emptyFill : styles.listContent}
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={Separator}
-        // Performance: avoid re-rendering every row on scroll
         removeClippedSubviews={false}
         maxToRenderPerBatch={15}
         windowSize={10}
@@ -111,15 +92,9 @@ export default function AudioListScreen() {
   );
 }
 
-function keyExtractor(item) { return String(item.id); }
-
-// ── Separator ─────────────────────────────────────────────────────────────────
-
 function Separator() {
   return <View style={styles.separator} />;
 }
-
-// ── EmptyView ─────────────────────────────────────────────────────────────────
 
 function EmptyView() {
   return (
@@ -133,28 +108,26 @@ function EmptyView() {
   );
 }
 
-// ── AudioRow ──────────────────────────────────────────────────────────────────
-// memo: only re-renders when audio prop or isActive/isPlaying changes.
-// Does NOT re-render on currentTime updates — those only affect PlayerBar.
-
+// memo keeps rows from re-rendering on every playback time tick
 const AudioRow = memo(function AudioRow({ audio, onPress }) {
   const { currentAudio, isPlaying } = useAudio();
 
-  const isActive     = currentAudio?.id === audio.id;
+  const isActive = currentAudio?.id === audio.id;
   const isNowPlaying = isActive && isPlaying;
 
-  const hasDuration  = audio.duration_ms > 0;
-  const hasPosition  = (audio.position_ms ?? 0) > 500;
-  const progress     = hasDuration
+  const hasDuration = audio.duration_ms > 0;
+  const hasPosition = (audio.position_ms ?? 0) > 500;
+  const progress = hasDuration
     ? Math.min((audio.position_ms ?? 0) / audio.duration_ms, 1)
     : 0;
-  const isCompleted  = hasDuration && progress >= 0.98;
-  const inProgress   = hasPosition && !isCompleted;
+  const isCompleted = hasDuration && progress >= 0.98;
+  const inProgress = hasPosition && !isCompleted;
 
   const rangeLabel = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
-  const duration   = fmtMs(audio.duration_ms);
-  const position   = fmtSec((audio.position_ms ?? 0) / 1000);
-  const totalDur   = fmtMs(audio.duration_ms);
+  const duration = fmtMs(audio.duration_ms);
+  const position = fmtSec((audio.position_ms ?? 0) / 1000);
+  const totalDur = fmtMs(audio.duration_ms);
+
   return (
     <TouchableOpacity
       style={[styles.row, isActive && styles.rowActive]}
@@ -165,14 +138,12 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
       accessibilityHint="Tap to open and listen"
       accessibilityState={{ selected: isActive }}
     >
-      {/* Number badge */}
       <View style={[styles.badge, isActive && styles.badgeActive]}>
         <Text style={[styles.badgeText, isActive && styles.badgeTextActive]}>
           {String(audio.ordering).padStart(2, '0')}
         </Text>
       </View>
 
-      {/* Centre info */}
       <View style={styles.info}>
         <Text
           style={[styles.title, isActive && styles.titleActive]}
@@ -185,21 +156,17 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
           <Text style={styles.range} numberOfLines={1}>{rangeLabel}</Text>
         ) : null}
 
-        {/* Meta: duration / resume / completed */}
         <View style={styles.meta}>
-          {/* Unstarted or no position: show duration alone */}
           {!inProgress && !isCompleted && duration ? (
             <Text style={styles.metaText}>{duration}</Text>
           ) : null}
 
-          {/* In progress: "Continue · pos / total" */}
           {inProgress && (
             <Text style={[styles.metaText, styles.resumeText]} numberOfLines={1}>
               {`Continue · ${position}${totalDur ? ` / ${totalDur}` : ''}`}
             </Text>
           )}
 
-          {/* Completed: "✓ Completed · total" */}
           {isCompleted && (
             <Text style={[styles.metaText, styles.completedText]} numberOfLines={1}>
               {`✓ Completed${totalDur ? ` · ${totalDur}` : ''}`}
@@ -207,7 +174,6 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
           )}
         </View>
 
-        {/* Progress bar */}
         {inProgress && hasDuration && (
           <View style={styles.progressTrack}>
             <View
@@ -220,7 +186,6 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
         )}
       </View>
 
-      {/* Play state indicator */}
       <View
         style={[
           styles.playBtn,
@@ -240,15 +205,11 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
   );
 });
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.background,
   },
-
-  // Header
   headerSafe: { backgroundColor: colors.hero },
   header: {
     paddingHorizontal: spacing.lg,
@@ -295,21 +256,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 0.3,
   },
-
-  // List
   listContent: {
     paddingTop: spacing.xs,
     paddingBottom: spacing.xxl,
   },
   emptyFill: { flex: 1 },
-
   separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.divider,
     marginLeft: 72 + spacing.md,
   },
-
-  // Empty
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -317,7 +273,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xxl,
   },
-  emptyIcon:  { fontSize: 44, marginBottom: spacing.md },
+  emptyIcon: { fontSize: 44, marginBottom: spacing.md },
   emptyTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -331,8 +287,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-
-  // Row
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -342,8 +296,6 @@ const styles = StyleSheet.create({
     minHeight: 76,
   },
   rowActive: { backgroundColor: colors.primaryLight },
-
-  // Badge
   badge: {
     width: 44,
     height: 44,
@@ -361,8 +313,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   badgeTextActive: { color: colors.textInverse },
-
-  // Info
   info: { flex: 1, marginRight: spacing.sm },
   title: {
     fontSize: 15,
@@ -377,8 +327,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginBottom: 4,
   },
-
-  // Meta
   meta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -390,10 +338,8 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontVariant: ['tabular-nums'],
   },
-  metaDot: { fontSize: 11, color: colors.borderLight },
-  resumeText: { color: colors.primary, fontWeight: '500' },  completedText: { color: colors.success, fontWeight: '500' },
-
-  // Progress bar
+  resumeText: { color: colors.primary, fontWeight: '500' },
+  completedText: { color: colors.success, fontWeight: '500' },
   progressTrack: {
     height: 3,
     borderRadius: 2,
@@ -406,8 +352,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gold,
     borderRadius: 2,
   },
-
-  // Play button
   playBtn: {
     width: 40,
     height: 40,

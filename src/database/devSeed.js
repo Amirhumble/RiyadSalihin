@@ -1,32 +1,8 @@
-/**
- * devSeed.js — development-only sample data.
- *
- * Inserts minimal placeholder records so screens have something to render
- * during development. Only runs when the chapters table is empty, and only
- * when __DEV__ is true (enforced by the call-site in database.js).
- *
- * REMOVE BEFORE SHIPPING TO PRODUCTION:
- *   1. Delete the `if (__DEV__) { await runDevSeed(_db); }` block in database.js
- *   2. This file can then be deleted too.
- *
- * Note: syncAudioContent() runs after devSeed and will overwrite the [DEV]
- * audio titles with real titles from audios.js — this is intentional.
- *
- * DEPENDENCY DIRECTION
- * ────────────────────
- * database.js → devSeed.js (one-way, no circular dependency)
- * devSeed.js receives the already-open db instance as a parameter.
- */
+// DEV ONLY — fills empty chapters/hadiths so audioLinks can resolve.
+// Only runs when __DEV__ is true and the chapters table is empty.
+// Real lesson titles come from content/audios.js via syncAudioContent().
 
-/**
- * Seeds the database with development-only placeholder data.
- * Only runs when the chapters table is empty.
- *
- * @param {import('expo-sqlite').SQLiteDatabase} db  — already-open DB instance
- * @returns {Promise<void>}
- */
 export async function runDevSeed(db) {
-  // Guard: skip if data already exists.
   const existing = await db.getFirstAsync(
     'SELECT COUNT(*) AS count FROM chapters;'
   );
@@ -37,7 +13,6 @@ export async function runDevSeed(db) {
   console.log('[DevSeed] Inserting sample development data …');
 
   await db.withTransactionAsync(async () => {
-    // ── chapters ─────────────────────────────────────────────────────
     await db.runAsync(
       `INSERT INTO chapters (chapter_number, arabic_title, english_title, ordering)
        VALUES (?, ?, ?, ?);`,
@@ -56,7 +31,6 @@ export async function runDevSeed(db) {
       'SELECT id FROM chapters WHERE chapter_number = 2;'
     );
 
-    // ── hadiths ───────────────────────────────────────────────────────
     const hadiths = [
       {
         chapter_id: ch1.id,
@@ -96,7 +70,6 @@ export async function runDevSeed(db) {
       );
     }
 
-    // Retrieve inserted hadith IDs for linking to audio.
     const hRow1 = await db.getFirstAsync(
       'SELECT id FROM hadiths WHERE chapter_id = ? AND hadith_number = ?;',
       [ch1.id, '1']
@@ -110,8 +83,6 @@ export async function runDevSeed(db) {
       [ch1.id, '3']
     );
 
-    // ── DEV audio records ─────────────────────────────────────────────
-    // Track 001 = Introduction (0/0), tracks 002-003 = hadiths 1 and 2.
     await db.runAsync(
       `INSERT INTO audios (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
        VALUES (?, ?, ?, ?, ?, ?);`,
@@ -138,7 +109,6 @@ export async function runDevSeed(db) {
       "SELECT id FROM audios WHERE filename = '003.mp3';"
     );
 
-    // ── hadith_audio links ────────────────────────────────────────────
     if (hRow1 && aRow1) {
       await db.runAsync(
         'INSERT OR IGNORE INTO hadith_audio (hadith_id, audio_id) VALUES (?, ?);',
@@ -159,5 +129,5 @@ export async function runDevSeed(db) {
     }
   });
 
-  console.log('[DevSeed] Sample data inserted (chapters, hadiths, audios, links).');
+  console.log('[DevSeed] Sample data inserted.');
 }
