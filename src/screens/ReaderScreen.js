@@ -293,17 +293,51 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   const trackRef = useRef(null);
   const trackMetrics = useRef({ pageX: 0, width: 0 });
 
-  // Finger position wins while dragging so status ticks do not fight the thumb
+  // While dragging: UI follows finger only (ignore live currentTime).
+  // After release: hold the chosen time until the player status catches up,
+  // otherwise the thumb briefly snaps back to the still-old currentTime.
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekRatio, setSeekRatio] = useState(0);
+  const [heldTime, setHeldTime] = useState(null);
   const isSeekingRef = useRef(false);
+  const heldTimeRef = useRef(null);
+  const moveRafRef = useRef(null);
+  const pendingRatioRef = useRef(0);
 
-  const displayRatio = isSeeking
-    ? seekRatio
-    : (dur > 0 ? Math.min(Math.max(time / dur, 0), 1) : 0);
+  // Drop the held scrub time once live status is close enough
+  useEffect(() => {
+    if (heldTime == null) return;
+    if (Math.abs(time - heldTime) <= 0.45) {
+      heldTimeRef.current = null;
+      setHeldTime(null);
+    }
+  }, [time, heldTime]);
+
+  // Absolute fallback so a slow/failed seek cannot pin the thumb forever
+  useEffect(() => {
+    if (heldTime == null) return undefined;
+    const timeoutId = setTimeout(() => {
+      heldTimeRef.current = null;
+      setHeldTime(null);
+    }, 1200);
+    return () => clearTimeout(timeoutId);
+  }, [heldTime]);
+
+  // Clear hold when this bar is no longer the active track
+  useEffect(() => {
+    if (isThis) return;
+    heldTimeRef.current = null;
+    setHeldTime(null);
+    isSeekingRef.current = false;
+    setIsSeeking(false);
+  }, [isThis]);
+
   const displayTime = isSeeking
     ? seekRatio * (dur || 0)
-    : time;
+    : (heldTime != null ? heldTime : time);
+  const displayRatio = dur > 0
+    ? Math.min(Math.max(displayTime / dur, 0), 1)
+    : 0;
 
   const measureTrack = useCallback(() => {
     trackRef.current?.measureInWindow?.((x, _y, width) => {
@@ -322,6 +356,24 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   useEffect(() => { seekRef.current = seek; }, [seek]);
   useEffect(() => { durRef.current = dur; }, [dur]);
 
+  const finishScrub = useCallback((ratio) => {
+    const durNow = durRef.current;
+    const finalPos = durNow > 0 ? ratio * durNow : 0;
+    pendingRatioRef.current = ratio;
+    setSeekRatio(ratio);
+    heldTimeRef.current = finalPos;
+    setHeldTime(finalPos);
+    isSeekingRef.current = false;
+    setIsSeeking(false);
+    // Single native seek on release — not on every move
+    if (durNow > 0) {
+      seekRef.current(finalPos);
+    }
+  }, []);
+
+  const finishScrubRef = useRef(finishScrub);
+  useEffect(() => { finishScrubRef.current = finishScrub; }, [finishScrub]);
+
   const stablePan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -333,37 +385,54 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
       onPanResponderGrant: (evt) => {
         measureTrack();
         const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        // Cancel any post-release hold; finger is the source of truth again
+        heldTimeRef.current = null;
+        setHeldTime(null);
         isSeekingRef.current = true;
+        pendingRatioRef.current = ratio;
         setIsSeeking(true);
         setSeekRatio(ratio);
       },
 
       onPanResponderMove: (evt) => {
         if (!isSeekingRef.current) return;
-        setSeekRatio(pageXToRatio(evt.nativeEvent.pageX));
+        // Coalesce move updates to one per frame (avoids setState storms)
+        pendingRatioRef.current = pageXToRatio(evt.nativeEvent.pageX);
+        if (moveRafRef.current != null) return;
+        moveRafRef.current = requestAnimationFrame(() => {
+          moveRafRef.current = null;
+          if (!isSeekingRef.current) return;
+          setSeekRatio(pendingRatioRef.current);
+        });
       },
 
       onPanResponderRelease: (evt) => {
-        const ratio = pageXToRatio(evt.nativeEvent.pageX);
-        isSeekingRef.current = false;
-        setIsSeeking(false);
-        setSeekRatio(ratio);
-        // Seek only on release — avoids thrashing the native player while dragging
-        if (durRef.current > 0) {
-          seekRef.current(ratio * durRef.current);
+        if (moveRafRef.current != null) {
+          cancelAnimationFrame(moveRafRef.current);
+          moveRafRef.current = null;
         }
+        const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        finishScrubRef.current(ratio);
       },
 
       onPanResponderTerminate: (evt) => {
-        const ratio = pageXToRatio(evt.nativeEvent.pageX);
-        isSeekingRef.current = false;
-        setIsSeeking(false);
-        if (durRef.current > 0) {
-          seekRef.current(ratio * durRef.current);
+        if (moveRafRef.current != null) {
+          cancelAnimationFrame(moveRafRef.current);
+          moveRafRef.current = null;
         }
+        const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        finishScrubRef.current(ratio);
       },
     })
   ).current;
+
+  // Drop any pending rAF on unmount
+  useEffect(() => () => {
+    if (moveRafRef.current != null) {
+      cancelAnimationFrame(moveRafRef.current);
+      moveRafRef.current = null;
+    }
+  }, []);
 
   const [speedOpen, setSpeedOpen] = useState(false);
 
@@ -379,9 +448,15 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const skip = useCallback((delta) => {
     if (!isThis || dur <= 0) return;
-    const next = Math.max(0, Math.min(time + delta, dur));
+    // Prefer the visible position if a scrub/hold is in progress
+    const base = isSeeking
+      ? seekRatio * dur
+      : (heldTime != null ? heldTime : time);
+    const next = Math.max(0, Math.min(base + delta, dur));
+    heldTimeRef.current = next;
+    setHeldTime(next);
     seek(next);
-  }, [isThis, time, dur, seek]);
+  }, [isThis, dur, isSeeking, seekRatio, heldTime, time, seek]);
 
   const handleSelectSpeed = useCallback((rate) => {
     setSpeed(rate);
