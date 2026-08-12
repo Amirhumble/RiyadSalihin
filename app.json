@@ -3,6 +3,7 @@
     "name": "RiyadusSalihinApp",
     "slug": "riyadusalihin",
     "version": "1.0.0",
+     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "riyadussalihinapp",
