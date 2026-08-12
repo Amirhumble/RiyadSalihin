@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 
-const INTRO_DURATION_MS = 2600;
+const INTRO_DURATION_MS = 3000;
 
 export default function IntroScreen() {
   const router = useRouter();
