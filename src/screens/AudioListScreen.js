@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback } from 'react';
 import {
   FlatList,
@@ -20,14 +20,17 @@ import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
 function fmtMs(ms) {
-  if (!ms || ms <= 0) return null;
-  const s = Math.floor(ms / 1000);
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const s = Math.floor(n / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function fmtSec(sec) {
-  if (!sec || sec <= 0) return '0:00';
-  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return '0:00';
+  const s = Math.floor(n);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 export default function AudioListScreen() {
@@ -36,6 +39,13 @@ export default function AudioListScreen() {
   const { data: audios, loading, error, refetch } = useDbQuery(
     () => getAllAudios(),
     []
+  );
+
+  // Refresh progress labels when returning from the reader (no full-screen flash)
+  useFocusEffect(
+    useCallback(() => {
+      refetch({ silent: true });
+    }, [refetch])
   );
 
   const handlePress = useCallback(
@@ -108,25 +118,37 @@ function EmptyView() {
   );
 }
 
-// memo keeps rows from re-rendering on every playback time tick
+function buildMetaLabel({ inProgress, isCompleted, position, totalDur, duration }) {
+  if (isCompleted) {
+    return totalDur ? `✓ Completed · ${totalDur}` : '✓ Completed';
+  }
+  if (inProgress) {
+    // Never show "null" — omit duration when unknown
+    return totalDur ? `Continue · ${position} / ${totalDur}` : `Continue · ${position}`;
+  }
+  return duration || null;
+}
+
+// Only re-renders when this row's audio prop or active/playing state changes
 const AudioRow = memo(function AudioRow({ audio, onPress }) {
   const { currentAudio, isPlaying } = useAudio();
 
   const isActive = currentAudio?.id === audio.id;
   const isNowPlaying = isActive && isPlaying;
 
-  const hasDuration = audio.duration_ms > 0;
-  const hasPosition = (audio.position_ms ?? 0) > 500;
-  const progress = hasDuration
-    ? Math.min((audio.position_ms ?? 0) / audio.duration_ms, 1)
-    : 0;
+  const positionMs = Number(audio.position_ms) || 0;
+  const durationMs = Number(audio.duration_ms) || 0;
+  const hasDuration = durationMs > 0;
+  const hasPosition = positionMs > 500;
+  const progress = hasDuration ? Math.min(positionMs / durationMs, 1) : 0;
   const isCompleted = hasDuration && progress >= 0.98;
   const inProgress = hasPosition && !isCompleted;
 
   const rangeLabel = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);
-  const duration = fmtMs(audio.duration_ms);
-  const position = fmtSec((audio.position_ms ?? 0) / 1000);
-  const totalDur = fmtMs(audio.duration_ms);
+  const duration = fmtMs(durationMs);
+  const position = fmtSec(positionMs / 1000);
+  const totalDur = fmtMs(durationMs);
+  const metaLabel = buildMetaLabel({ inProgress, isCompleted, position, totalDur, duration });
 
   return (
     <TouchableOpacity
@@ -156,25 +178,20 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
           <Text style={styles.range} numberOfLines={1}>{rangeLabel}</Text>
         ) : null}
 
-        <View style={styles.meta}>
-          {!inProgress && !isCompleted && duration ? (
-            <Text style={styles.metaText}>{duration}</Text>
-          ) : null}
+        {metaLabel ? (
+          <Text
+            style={[
+              styles.metaText,
+              inProgress && styles.resumeText,
+              isCompleted && styles.completedText,
+            ]}
+            numberOfLines={1}
+          >
+            {metaLabel}
+          </Text>
+        ) : null}
 
-          {inProgress && (
-            <Text style={[styles.metaText, styles.resumeText]} numberOfLines={1}>
-              {`Continue · ${position}${totalDur ? ` / ${totalDur}` : ''}`}
-            </Text>
-          )}
-
-          {isCompleted && (
-            <Text style={[styles.metaText, styles.completedText]} numberOfLines={1}>
-              {`✓ Completed${totalDur ? ` · ${totalDur}` : ''}`}
-            </Text>
-          )}
-        </View>
-
-        {inProgress && hasDuration && (
+        {inProgress && hasDuration ? (
           <View style={styles.progressTrack}>
             <View
               style={[
@@ -183,7 +200,7 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
               ]}
             />
           </View>
-        )}
+        ) : null}
       </View>
 
       <View
@@ -327,12 +344,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginBottom: 4,
   },
-  meta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
   metaText: {
     fontSize: 11,
     color: colors.textMuted,
@@ -353,9 +364,9 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   playBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1.5,
     borderColor: colors.borderLight,
     alignItems: 'center',

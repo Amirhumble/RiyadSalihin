@@ -13,6 +13,7 @@ import {
   Modal,
   PanResponder,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -49,9 +50,17 @@ const SPEED_OPTIONS = [
 ];
 
 function fmt(sec) {
-  if (!sec || !isFinite(sec) || sec < 0) return '0:00';
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
   const s = Math.floor(sec);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function clampPage(raw, totalPages) {
+  if (raw == null || !Number.isInteger(Number(raw))) return 1;
+  const n = Number(raw);
+  if (n < 1) return 1;
+  if (totalPages > 0) return Math.min(n, totalPages);
+  return n;
 }
 
 export default function ReaderScreen() {
@@ -65,20 +74,25 @@ export default function ReaderScreen() {
 
   const [pdfUri, setPdfUri] = useState(_cachedPdfUri);
   const [pdfResolving, setPdfResolving] = useState(!_cachedPdfUri);
-  const [pdfRendering, setPdfRendering] = useState(false);
+  const [pdfReady, setPdfReady] = useState(false);
   const [pdfError, setPdfError] = useState(pdfModuleError);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
 
   const pdfRef = useRef(null);
-  const audioRef = useRef(null);
-  useEffect(() => { audioRef.current = audio; }, [audio]);
+  const loadedAudioIdRef = useRef(null);
+  const lastPageForAudioRef = useRef(null);
+
+  // Stable source object so Pdf does not see a new prop every parent render
+  const pdfSource = useMemo(
+    () => (pdfUri ? { uri: pdfUri, cache: true } : null),
+    [pdfUri]
+  );
 
   const resolvePdf = useCallback(async (cancelRef) => {
     if (_cachedPdfUri) {
       setPdfUri(_cachedPdfUri);
       setPdfResolving(false);
-      setPdfRendering(true);
       return;
     }
     try {
@@ -90,7 +104,6 @@ export default function ReaderScreen() {
       if (!asset.localUri) throw new Error('PDF could not be prepared.');
       _cachedPdfUri = asset.localUri;
       setPdfUri(asset.localUri);
-      setPdfRendering(true);
     } catch (err) {
       console.error('[ReaderScreen] PDF asset error:', err);
       if (!cancelRef?.current) setPdfError(err);
@@ -100,48 +113,83 @@ export default function ReaderScreen() {
   }, []);
 
   useEffect(() => {
-    if (pdfModuleError) { setPdfResolving(false); return; }
+    if (pdfModuleError) {
+      setPdfResolving(false);
+      return;
+    }
     const cancelRef = { current: false };
     resolvePdf(cancelRef);
     return () => { cancelRef.current = true; };
   }, [resolvePdf]);
 
+  // Load / switch audio when the lesson id changes (not on every audio object identity)
   const { loadAudio } = useAudio();
-  const audioLoadedRef = useRef(false);
   useEffect(() => {
-    if (!audio || audioLoadedRef.current) return;
-    audioLoadedRef.current = true;
+    if (!audio?.id) return;
+    if (loadedAudioIdRef.current === audio.id) return;
+    loadedAudioIdRef.current = audio.id;
+    lastPageForAudioRef.current = null;
     loadAudio(audio, audio.position_ms ?? 0);
   }, [audio, loadAudio]);
 
-  const handlePdfLoadComplete = useCallback((pages) => {
-    setTotalPages(pages);
-    setPdfRendering(false);
-    const raw = audioRef.current?.pdf_page;
-    const target = (raw != null && Number.isInteger(raw) && raw >= 1)
-      ? Math.max(1, Math.min(raw, pages)) : 1;
+  // Jump PDF to this lesson's page once PDF is ready (and when lesson changes)
+  const goToAudioPage = useCallback((audioRecord, pages) => {
+    if (!audioRecord || !pages) return;
+    const target = clampPage(audioRecord.pdf_page, pages);
+    if (lastPageForAudioRef.current === `${audioRecord.id}:${target}`) return;
+    lastPageForAudioRef.current = `${audioRecord.id}:${target}`;
     setCurrentPage(target);
-    if (target > 1) setTimeout(() => pdfRef.current?.setPage(target), 100);
+    // setPage after a short beat so the native view is ready
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          pdfRef.current?.setPage?.(target);
+        } catch (err) {
+          console.warn('[ReaderScreen] setPage failed:', err);
+        }
+      }, 50);
+    });
   }, []);
 
-  const handlePdfPageChanged = useCallback((page) => setCurrentPage(page), []);
+  const handlePdfLoadComplete = useCallback((pages) => {
+    const total = typeof pages === 'number' ? pages : (pages?.numberOfPages ?? 0);
+    setTotalPages(total);
+    setPdfReady(true);
+    if (audio) goToAudioPage(audio, total);
+  }, [audio, goToAudioPage]);
+
+  // If PDF already loaded and user opens another lesson, only change page
+  useEffect(() => {
+    if (!audio || !pdfReady || totalPages <= 0) return;
+    goToAudioPage(audio, totalPages);
+  }, [audio?.id, pdfReady, totalPages, goToAudioPage, audio]);
+
+  const handlePdfPageChanged = useCallback((page) => {
+    const p = typeof page === 'number' ? page : page?.page ?? page;
+    if (typeof p === 'number' && p >= 1) setCurrentPage(p);
+  }, []);
 
   const handlePdfError = useCallback((err) => {
     console.error('[ReaderScreen] PDF render error:', err);
     setPdfError(err);
-    setPdfRendering(false);
+    setPdfReady(false);
   }, []);
 
-  const isLoading = audioLoading || pdfResolving;
+  const showLoading = (audioLoading || pdfResolving || (pdfUri && !pdfReady)) && !pdfError;
+  const rangeLabel = audio
+    ? formatHadithRange(audio.hadith_number_from, audio.hadith_number_to)
+    : null;
 
   return (
     <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
+
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.headerBack}
             onPress={() => router.back()}
-            hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             accessibilityLabel="Go back to lessons"
             accessibilityRole="button"
           >
@@ -150,30 +198,35 @@ export default function ReaderScreen() {
 
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {audio?.title ?? 'Loading…'}
+              {audio?.title ?? 'Opening lesson…'}
             </Text>
-            {audio ? (
-              <Text style={styles.headerSub} numberOfLines={1}>
-                {formatHadithRange(audio.hadith_number_from, audio.hadith_number_to) ?? ''}
-              </Text>
+            {rangeLabel ? (
+              <Text style={styles.headerSub} numberOfLines={1}>{rangeLabel}</Text>
             ) : null}
           </View>
 
           <View style={styles.headerRight}>
-            {totalPages > 0
-              ? <Text style={styles.pageCounter}>{currentPage} / {totalPages}</Text>
-              : <View style={styles.headerRight} />}
+            {totalPages > 0 ? (
+              <View style={styles.pageBadge}>
+                <Text style={styles.pageCounter}>
+                  {currentPage} / {totalPages}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.headerRightSpacer} />
+            )}
           </View>
         </View>
       </SafeAreaView>
 
       <View style={styles.pdfArea}>
-        {(isLoading || pdfRendering) && !pdfError && (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.loadingText}>
-              {pdfResolving ? 'Opening book…' : 'Loading page…'}
-            </Text>
+        {showLoading && (
+          <View style={styles.loadingOverlay} pointerEvents="none">
+            <View style={styles.loadingCard}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingTitle}>Opening the lesson…</Text>
+              <Text style={styles.loadingSub}>Preparing the book and audio</Text>
+            </View>
           </View>
         )}
 
@@ -182,14 +235,15 @@ export default function ReaderScreen() {
             error={pdfError}
             onRetry={() => {
               setPdfUri(null);
+              setPdfReady(false);
               _cachedPdfUri = null;
               resolvePdf({ current: false });
             }}
           />
-        ) : Pdf && pdfUri ? (
+        ) : Pdf && pdfSource ? (
           <Pdf
             ref={pdfRef}
-            source={{ uri: pdfUri, cache: true }}
+            source={pdfSource}
             style={styles.pdf}
             onLoadComplete={handlePdfLoadComplete}
             onPageChanged={handlePdfPageChanged}
@@ -198,11 +252,12 @@ export default function ReaderScreen() {
             horizontal={false}
             enableAnnotationRendering={false}
             trustAllCerts={false}
+            spacing={8}
           />
         ) : null}
       </View>
 
-      <View style={[styles.playerBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+      <View style={[styles.playerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         {audioDbError ? (
           <View style={styles.playerMessage}>
             <Text style={styles.playerMessageText}>Audio is currently unavailable.</Text>
@@ -219,38 +274,49 @@ export default function ReaderScreen() {
   );
 }
 
-// memo: live ticks stay inside PlayerBar so the PDF does not re-render
+// Live ticks stay inside PlayerBar — PDF / shell do not re-render on time updates
 const PlayerBar = memo(function PlayerBar({ audio }) {
   const {
     currentAudio, audioError, clearAudioError,
     isPlaying, isBuffering, audioLoading,
-    currentTime, duration,
+    currentTime, duration, didJustFinish,
     playbackRate,
     loadAudio, play, pause, seek, setSpeed,
   } = useAudioPlayer();
 
   const isThis = currentAudio?.id === audio?.id;
-  const playing = isThis && isPlaying;
+  const playing = isThis && isPlaying && !didJustFinish;
   const buffering = isThis && (isBuffering || audioLoading);
   const time = isThis ? currentTime : 0;
-  const dur = isThis ? duration : 0;
-  const trackW = useRef(0);
+  const dur = isThis && duration > 0 ? duration : 0;
 
-  // While dragging, show finger position instead of player time
-  // so status ticks do not fight the user's finger
+  const trackRef = useRef(null);
+  const trackMetrics = useRef({ pageX: 0, width: 0 });
+
+  // Finger position wins while dragging so status ticks do not fight the thumb
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekRatio, setSeekRatio] = useState(0);
+  const isSeekingRef = useRef(false);
 
-  const displayRatio = isSeeking ? seekRatio
-    : (dur > 0 ? Math.min(time / dur, 1) : 0);
-  const displayTime = isSeeking ? seekRatio * dur : time;
+  const displayRatio = isSeeking
+    ? seekRatio
+    : (dur > 0 ? Math.min(Math.max(time / dur, 0), 1) : 0);
+  const displayTime = isSeeking
+    ? seekRatio * (dur || 0)
+    : time;
 
-  function xToRatio(x) {
-    if (!trackW.current || trackW.current <= 0) return 0;
-    return Math.max(0, Math.min(x / trackW.current, 1));
-  }
+  const measureTrack = useCallback(() => {
+    trackRef.current?.measureInWindow?.((x, _y, width) => {
+      if (width > 0) trackMetrics.current = { pageX: x, width };
+    });
+  }, []);
 
-  // Refs so the one-time PanResponder always sees the latest seek/dur
+  const pageXToRatio = useCallback((pageX) => {
+    const { pageX: origin, width } = trackMetrics.current;
+    if (!width || width <= 0) return 0;
+    return Math.max(0, Math.min((pageX - origin) / width, 1));
+  }, []);
+
   const seekRef = useRef(seek);
   const durRef = useRef(dur);
   useEffect(() => { seekRef.current = seek; }, [seek]);
@@ -259,29 +325,42 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   const stablePan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: (evt) => {
-        const ratio = xToRatio(evt.nativeEvent.locationX);
+        measureTrack();
+        const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        isSeekingRef.current = true;
         setIsSeeking(true);
         setSeekRatio(ratio);
       },
 
       onPanResponderMove: (evt) => {
-        const ratio = xToRatio(evt.nativeEvent.locationX);
-        setSeekRatio(ratio);
+        if (!isSeekingRef.current) return;
+        setSeekRatio(pageXToRatio(evt.nativeEvent.pageX));
       },
 
       onPanResponderRelease: (evt) => {
-        const ratio = xToRatio(evt.nativeEvent.locationX);
+        const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        isSeekingRef.current = false;
         setIsSeeking(false);
-        if (durRef.current > 0) seekRef.current(ratio * durRef.current);
+        setSeekRatio(ratio);
+        // Seek only on release — avoids thrashing the native player while dragging
+        if (durRef.current > 0) {
+          seekRef.current(ratio * durRef.current);
+        }
       },
 
       onPanResponderTerminate: (evt) => {
-        const ratio = xToRatio(evt.nativeEvent.locationX);
+        const ratio = pageXToRatio(evt.nativeEvent.pageX);
+        isSeekingRef.current = false;
         setIsSeeking(false);
-        if (durRef.current > 0) seekRef.current(ratio * durRef.current);
+        if (durRef.current > 0) {
+          seekRef.current(ratio * durRef.current);
+        }
       },
     })
   ).current;
@@ -290,14 +369,18 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const handlePlayPause = useCallback(() => {
     clearAudioError();
-    if (!isThis) loadAudio(audio, audio.position_ms ?? 0);
-    else if (playing) pause();
+    if (!isThis) {
+      loadAudio(audio, audio.position_ms ?? 0);
+      return;
+    }
+    if (playing) pause();
     else play();
   }, [isThis, playing, audio, loadAudio, play, pause, clearAudioError]);
 
   const skip = useCallback((delta) => {
-    if (!isThis) return;
-    seek(Math.max(0, Math.min(time + delta, dur)));
+    if (!isThis || dur <= 0) return;
+    const next = Math.max(0, Math.min(time + delta, dur));
+    seek(next);
   }, [isThis, time, dur, seek]);
 
   const handleSelectSpeed = useCallback((rate) => {
@@ -305,10 +388,10 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
     setSpeedOpen(false);
   }, [setSpeed]);
 
-  const speedLabel = useMemo(
-    () => playbackRate === 1 ? '1×' : `${playbackRate}×`,
-    [playbackRate]
-  );
+  const speedLabel = useMemo(() => {
+    const found = SPEED_OPTIONS.find((o) => o.rate === playbackRate);
+    return found?.label ?? (playbackRate === 1 ? '1×' : `${playbackRate}×`);
+  }, [playbackRate]);
 
   const rangeLabel = formatHadithRange(
     audio?.hadith_number_from,
@@ -317,38 +400,35 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const timeStr = fmt(displayTime);
   const durStr = dur > 0 ? fmt(dur) : '--:--';
-  const pct = `${Math.round(displayRatio * 100)}%`;
+  const fillWidth = `${Math.round(displayRatio * 1000) / 10}%`;
 
-  const accessValue = useMemo(() => {
-    const nowSec = Math.round(displayTime);
-    const maxSec = Math.round(dur);
-    const nowMin = Math.floor(nowSec / 60);
-    const nowRem = nowSec % 60;
-    const maxMin = Math.floor(maxSec / 60);
-    const maxRem = maxSec % 60;
-    const nowStr = nowMin > 0
-      ? `${nowMin} minute${nowMin !== 1 ? 's' : ''} ${nowRem} second${nowRem !== 1 ? 's' : ''}`
-      : `${nowSec} second${nowSec !== 1 ? 's' : ''}`;
-    const maxStr = maxSec > 0
-      ? (maxMin > 0
-        ? `${maxMin} minute${maxMin !== 1 ? 's' : ''} ${maxRem} second${maxRem !== 1 ? 's' : ''}`
-        : `${maxSec} second${maxSec !== 1 ? 's' : ''}`)
-      : 'unknown duration';
-    return {
-      min: 0,
-      max: Math.round(dur),
-      now: nowSec,
-      text: `${nowStr} of ${maxStr}`,
-    };
-  }, [displayTime, dur]);
+  const accessValue = useMemo(() => ({
+    min: 0,
+    max: Math.max(0, Math.round(dur)),
+    now: Math.round(displayTime),
+    text: `${fmt(displayTime)} of ${dur > 0 ? fmt(dur) : 'unknown duration'}`,
+  }), [displayTime, dur]);
 
   return (
     <View style={pl.container}>
-      <View style={pl.trackInfo}>
-        <Text style={pl.trackTitle} numberOfLines={1}>{audio?.title ?? ''}</Text>
-        {rangeLabel ? (
-          <Text style={pl.trackRange} numberOfLines={1}>{rangeLabel}</Text>
-        ) : null}
+      <View style={pl.topRow}>
+        <View style={pl.trackInfo}>
+          <Text style={pl.trackTitle} numberOfLines={1}>{audio?.title ?? ''}</Text>
+          {rangeLabel ? (
+            <Text style={pl.trackRange} numberOfLines={1}>{rangeLabel}</Text>
+          ) : null}
+        </View>
+
+        <TouchableOpacity
+          style={pl.speedBtn}
+          onPress={() => setSpeedOpen(true)}
+          activeOpacity={0.7}
+          accessibilityLabel={`Playback speed, currently ${speedLabel}`}
+          accessibilityRole="button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={pl.speedLabel}>{speedLabel}</Text>
+        </TouchableOpacity>
       </View>
 
       {isThis && audioError ? (
@@ -363,17 +443,24 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
       </View>
 
       <View
+        ref={trackRef}
         style={pl.trackWrap}
-        onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }}
+        onLayout={measureTrack}
         accessibilityRole="adjustable"
         accessibilityLabel="Audio progress"
         accessibilityValue={accessValue}
         {...stablePan.panHandlers}
       >
         <View style={pl.trackBg}>
-          <View style={[pl.trackFill, { width: pct }]} />
+          <View style={[pl.trackFill, { width: fillWidth }]} />
         </View>
-        <View style={[pl.thumb, { left: pct }, isSeeking && pl.thumbDragging]} />
+        <View
+          style={[
+            pl.thumb,
+            { left: fillWidth },
+            isSeeking && pl.thumbDragging,
+          ]}
+        />
       </View>
 
       <View style={pl.controls}>
@@ -383,26 +470,26 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           activeOpacity={0.65}
           accessibilityLabel="Rewind 10 seconds"
           accessibilityRole="button"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <View style={pl.skipInner}>
-            <Text style={pl.skipArrow}>↺</Text>
-            <Text style={pl.skipNum}>10</Text>
-          </View>
+          <Text style={pl.skipIcon}>−10</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={pl.playBtn}
+          style={[pl.playBtn, playing && pl.playBtnActive]}
           onPress={handlePlayPause}
-          activeOpacity={0.75}
+          activeOpacity={0.85}
           accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}
           accessibilityRole="button"
-          accessibilityState={{ busy: buffering }}
+          accessibilityState={{ busy: buffering, checked: playing }}
         >
-          {buffering
-            ? <ActivityIndicator color={colors.hero} size="small" />
-            : <Text style={pl.playIcon}>{playing ? '⏸' : '▶'}</Text>
-          }
+          {buffering ? (
+            <ActivityIndicator color={colors.hero} size="small" />
+          ) : (
+            <Text style={[pl.playIcon, !playing && pl.playIconOffset]}>
+              {playing ? '⏸' : '▶'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -411,32 +498,11 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           activeOpacity={0.65}
           accessibilityLabel="Skip forward 10 seconds"
           accessibilityRole="button"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <View style={pl.skipInner}>
-            <Text style={pl.skipNum}>10</Text>
-            <Text style={pl.skipArrow}>↻</Text>
-          </View>
+          <Text style={pl.skipIcon}>+10</Text>
         </TouchableOpacity>
       </View>
-
-      <View style={pl.speedRow}>
-        <TouchableOpacity
-          style={pl.speedBtn}
-          onPress={() => setSpeedOpen(true)}
-          activeOpacity={0.7}
-          accessibilityLabel={`Playback speed, currently ${speedLabel}`}
-          accessibilityRole="button"
-        >
-          <Text style={pl.speedLabel}>{speedLabel}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {__DEV__ && isThis && (
-        <Text style={pl.devText} numberOfLines={1}>
-          {`DEV ${audio?.filename}  ${playing ? '▶' : '⏸'}  ${timeStr}/${durStr}  ${playbackRate}×${isSeeking ? '  [drag]' : ''}`}
-        </Text>
-      )}
 
       <SpeedSheet
         visible={speedOpen}
@@ -457,7 +523,12 @@ const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClos
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={sp.backdrop} onPress={onClose} />
+      <Pressable
+        style={sp.backdrop}
+        onPress={onClose}
+        accessibilityLabel="Close speed selector"
+        accessibilityRole="button"
+      />
       <View style={sp.sheet}>
         <View style={sp.handle} />
         <Text style={sp.title}>Playback Speed</Text>
@@ -477,7 +548,7 @@ const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClos
                 {label}
                 {note ? <Text style={sp.optionNote}>  {note}</Text> : null}
               </Text>
-              {active && <Text style={sp.check}>✓</Text>}
+              {active ? <Text style={sp.check}>✓</Text> : null}
             </TouchableOpacity>
           );
         })}
@@ -488,7 +559,11 @@ const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClos
 
 function PdfErrorView({ error, onRetry }) {
   const msg = error?.message ?? '';
-  const isNative = msg.includes('NativeModule') || msg.includes('RNPDFPdf') || msg.includes('cannot be null');
+  const isNative =
+    msg.includes('NativeModule') ||
+    msg.includes('RNPDFPdf') ||
+    msg.includes('cannot be null');
+
   return (
     <View style={styles.pdfError}>
       <Text style={styles.pdfErrorIcon}>📄</Text>
@@ -497,10 +572,10 @@ function PdfErrorView({ error, onRetry }) {
       </Text>
       <Text style={styles.pdfErrorBody}>
         {isNative
-          ? 'Please rebuild the development client.'
-          : 'The file could not be read. Please try again.'}
+          ? 'Please rebuild the development client and try again.'
+          : 'The book could not be opened. Please try again.'}
       </Text>
-      {!isNative && onRetry && (
+      {!isNative && onRetry ? (
         <TouchableOpacity
           style={styles.pdfRetryBtn}
           onPress={onRetry}
@@ -510,29 +585,45 @@ function PdfErrorView({ error, onRetry }) {
         >
           <Text style={styles.pdfRetryText}>Try again</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.backgroundSecondary },
-  headerSafe: { backgroundColor: colors.hero },
+  root: {
+    flex: 1,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  headerSafe: {
+    backgroundColor: colors.heroDark,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 10,
-    minHeight: 54,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 8,
+    minHeight: 52,
   },
   headerBack: {
     width: 48,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
   },
-  backArrow: { fontSize: 32, color: colors.heroText, lineHeight: 36, marginTop: -2 },
-  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: spacing.xs },
+  backArrow: {
+    fontSize: 34,
+    color: colors.heroText,
+    lineHeight: 38,
+    marginTop: -2,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
+  },
   headerTitle: {
     fontSize: 15,
     fontWeight: '600',
@@ -546,25 +637,58 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerRight: {
-    width: 56,
+    minWidth: 56,
     alignItems: 'flex-end',
     justifyContent: 'center',
+    paddingRight: spacing.sm,
+  },
+  headerRightSpacer: { width: 56 },
+  pageBadge: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
   pageCounter: {
     fontSize: 11,
     color: colors.heroSubtext,
     fontVariant: ['tabular-nums'],
+    fontWeight: '600',
   },
-  pdfArea: { flex: 1 },
-  pdf: { flex: 1, width: '100%', backgroundColor: colors.backgroundSecondary },
+  pdfArea: {
+    flex: 1,
+    backgroundColor: '#E8E8E6',
+  },
+  pdf: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#E8E8E6',
+  },
   loadingOverlay: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
   },
-  loadingText: { fontSize: 14, color: colors.textMuted, marginTop: spacing.sm },
+  loadingCard: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+  },
+  loadingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  loadingSub: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+  },
   pdfError: {
     flex: 1,
     alignItems: 'center',
@@ -574,57 +698,81 @@ const styles = StyleSheet.create({
   },
   pdfErrorIcon: { fontSize: 40, marginBottom: spacing.md },
   pdfErrorTitle: {
-    fontSize: 17, fontWeight: '600', color: colors.text,
-    textAlign: 'center', marginBottom: spacing.sm,
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   pdfErrorBody: {
-    fontSize: 13, color: colors.textMuted,
-    textAlign: 'center', lineHeight: 20, marginBottom: spacing.lg,
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.lg,
   },
   pdfRetryBtn: {
     backgroundColor: colors.primary,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
     minHeight: 44,
     justifyContent: 'center',
   },
-  pdfRetryText: { color: colors.textInverse, fontSize: 15, fontWeight: '600' },
-  playerBar: {
-    backgroundColor: colors.hero,
+  pdfRetryText: {
+    color: colors.textInverse,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  playerShell: {
+    backgroundColor: colors.heroDark,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    // Lift slightly over the PDF edge
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 12,
   },
   playerMessage: {
     paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 56,
   },
-  playerMessageText: { fontSize: 13, color: colors.heroSubtext, textAlign: 'center' },
+  playerMessageText: {
+    fontSize: 13,
+    color: colors.heroSubtext,
+    textAlign: 'center',
+  },
 });
 
 const pl = StyleSheet.create({
   container: {
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
   },
-  trackInfo: {
+  topRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     marginBottom: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    gap: spacing.sm,
+  },
+  trackInfo: {
+    flex: 1,
+    paddingRight: spacing.xs,
   },
   trackTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: colors.heroText,
-    textAlign: 'center',
     letterSpacing: 0.1,
   },
   trackRange: {
     fontSize: 11,
     color: colors.heroSubtext,
-    textAlign: 'center',
     marginTop: 2,
   },
   errorText: {
@@ -637,13 +785,15 @@ const pl = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 2,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   timeText: {
     fontSize: 11,
     color: colors.heroSubtext,
     fontVariant: ['tabular-nums'],
+    fontWeight: '500',
   },
+  // Tall hit area; visible track is thinner inside
   trackWrap: {
     height: 44,
     justifyContent: 'center',
@@ -651,67 +801,64 @@ const pl = StyleSheet.create({
     position: 'relative',
   },
   trackBg: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     overflow: 'hidden',
   },
   trackFill: {
     height: '100%',
     backgroundColor: colors.gold,
-    borderRadius: 2,
+    borderRadius: 3,
   },
   thumb: {
     position: 'absolute',
     top: '50%',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.gold,
-    marginTop: -8,
-    marginLeft: -8,
-    elevation: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 3,
+    borderColor: colors.gold,
+    marginTop: -10,
+    marginLeft: -10,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
   },
   thumbDragging: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    marginTop: -11,
-    marginLeft: -11,
-    elevation: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    marginTop: -13,
+    marginLeft: -13,
+    borderWidth: 3.5,
+    elevation: 10,
   },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xl + spacing.md,
-    marginBottom: spacing.sm,
+    gap: spacing.xl + spacing.sm,
+    paddingBottom: spacing.xs,
   },
   skipBtn: {
-    minWidth: 52,
-    minHeight: 44,
+    minWidth: 56,
+    minHeight: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
   },
-  skipInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  skipArrow: {
-    fontSize: 22,
-    color: colors.heroSubtext,
-    lineHeight: 26,
-  },
-  skipNum: {
-    fontSize: 13,
+  skipIcon: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.heroSubtext,
     fontVariant: ['tabular-nums'],
+    letterSpacing: 0.3,
   },
   playBtn: {
     width: 72,
@@ -720,45 +867,40 @@ const pl = StyleSheet.create({
     backgroundColor: colors.heroText,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+  },
+  playBtnActive: {
+    backgroundColor: colors.gold,
   },
   playIcon: {
-    fontSize: 28,
-    color: colors.hero,
+    fontSize: 26,
+    color: colors.heroDark,
+    fontWeight: '700',
+  },
+  playIconOffset: {
     marginLeft: 3,
   },
-  speedRow: {
-    alignItems: 'center',
-    marginTop: spacing.xs,
-  },
   speedBtn: {
-    minWidth: 52,
-    minHeight: 32,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 5,
-    borderRadius: 16,
+    minWidth: 48,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+    borderColor: 'rgba(201,168,76,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   speedLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.heroSubtext,
-    letterSpacing: 0.4,
-  },
-  devText: {
-    fontSize: 9,
-    color: colors.heroMuted,
-    marginTop: spacing.xs,
-    fontFamily: 'monospace',
-    textAlign: 'center',
+    color: colors.gold,
+    letterSpacing: 0.3,
   },
 });
 
@@ -800,7 +942,7 @@ const sp = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.sm,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 2,
     minHeight: 48,
   },

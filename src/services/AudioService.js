@@ -49,6 +49,16 @@ export async function stop() {
 }
 
 export function setRate(rate) {
-  // 'medium' pitch correction keeps speech natural at higher speeds
-  getPlayer().setPlaybackRate(rate, 'medium');
+  const player = getPlayer();
+  try {
+    // 'medium' pitch correction keeps speech natural at higher speeds
+    player.setPlaybackRate(rate, 'medium');
+  } catch (err) {
+    try {
+      player.setPlaybackRate(rate);
+    } catch (err2) {
+      console.warn('[AudioService] setRate failed:', err2);
+      throw err2;
+    }
+  }
 }

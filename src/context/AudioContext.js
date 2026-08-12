@@ -1,11 +1,10 @@
 // Shared audio state for the whole app.
 //
-// Two contexts keep list rows cheap:
-//   AudioStableContext — track, errors, speed, commands (rarely changes)
-//   AudioLiveContext   — playing / time / buffering (updates while playing)
+// AudioStableContext — track, play/pause flag, speed, commands (changes rarely)
+// AudioLiveContext   — time / buffering (ticks while playing)
 //
-// List rows use useAudio() so they do not re-render on every time tick.
-// PlayerBar uses useAudioPlayer() so it can show live progress.
+// List rows use useAudio() → only stable context → no re-render on time ticks.
+// PlayerBar uses useAudioPlayer() → live progress.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAudioPlayerStatus } from 'expo-audio';
@@ -14,6 +13,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -46,10 +46,15 @@ export function AudioProvider({ children }) {
 
   const playerRef = useRef(getPlayer());
   const lastPersist = useRef(0);
-  // Only write duration once per track per session
   const durationSavedFor = useRef(null);
+  const currentAudioRef = useRef(null);
+  const actionLock = useRef(false);
 
   const status = useAudioPlayerStatus(playerRef.current);
+
+  useEffect(() => {
+    currentAudioRef.current = currentAudio;
+  }, [currentAudio]);
 
   useEffect(() => {
     configureAudioSession();
@@ -60,7 +65,7 @@ export function AudioProvider({ children }) {
       const rate = stored ? parseFloat(stored) : DEFAULT_SPEED;
       if (rate && rate > 0 && rate <= 2) {
         setPlaybackRate(rate);
-        svcSetRate(rate);
+        try { svcSetRate(rate); } catch (_) { /* unsupported rate */ }
       }
     }).catch(() => {});
   }, []);
@@ -72,18 +77,21 @@ export function AudioProvider({ children }) {
     }
   }, [status.didJustFinish, currentAudio]);
 
-  // Save position at most every 5 seconds while playing
+  // Save position at most every 5 seconds while playing (never during UI-only drag)
   useEffect(() => {
     if (!status.playing || !currentAudio) return;
+    if (status.didJustFinish) return;
     const now = Date.now();
     if (now - lastPersist.current >= PERSIST_INTERVAL_MS) {
       lastPersist.current = now;
-      const posMs = Math.round(status.currentTime * 1_000);
-      savePlaybackPosition(currentAudio.id, posMs).catch(() => {});
+      const posMs = Math.round((status.currentTime ?? 0) * 1_000);
+      if (posMs >= 0) {
+        savePlaybackPosition(currentAudio.id, posMs).catch(() => {});
+      }
     }
-  }, [status.playing, status.currentTime, currentAudio]);
+  }, [status.playing, status.currentTime, status.didJustFinish, currentAudio]);
 
-  // Save duration the first time expo-audio reports it for this track
+  // Save duration once per track when expo-audio first reports it
   useEffect(() => {
     if (!currentAudio) return;
 
@@ -118,15 +126,22 @@ export function AudioProvider({ children }) {
     setAudioError(null);
     setCurrentAudio(audioRecord);
     durationSavedFor.current = null;
+    lastPersist.current = 0;
 
     try {
       loadSource(source);
-      svcSetRate(playbackRate);
-      if (startPositionMs > 0) {
+      try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
+
+      const resumeAt = Math.max(0, (startPositionMs || 0) / 1_000);
+      if (resumeAt > 0) {
         // Brief delay so the new source is ready before seeking
-        setTimeout(() => svcSeekTo(startPositionMs / 1_000).catch(() => {}), 300);
+        setTimeout(() => {
+          svcSeekTo(resumeAt).catch(() => {});
+          try { svcPlay(); } catch (_) { /* ignore */ }
+        }, 250);
+      } else {
+        svcPlay();
       }
-      svcPlay();
     } catch (err) {
       console.error('[AudioContext] loadAudio failed:', err);
       setAudioError(err);
@@ -136,29 +151,60 @@ export function AudioProvider({ children }) {
   }, [playbackRate]);
 
   const play = useCallback(() => {
+    if (actionLock.current) return;
+    actionLock.current = true;
     setAudioError(null);
     try {
-      svcPlay();
+      const p = playerRef.current;
+      const dur = p?.duration ?? 0;
+      const t = p?.currentTime ?? 0;
+      // After completion (or at end), restart from the beginning
+      if (dur > 0 && t >= Math.max(0, dur - 0.35)) {
+        svcSeekTo(0).then(() => svcPlay()).catch(() => {
+          try { svcPlay(); } catch (err) { setAudioError(err); }
+        });
+      } else {
+        svcPlay();
+      }
     } catch (err) {
       setAudioError(err);
+    } finally {
+      setTimeout(() => { actionLock.current = false; }, 120);
     }
   }, []);
 
   const pause = useCallback(() => {
+    if (actionLock.current) return;
+    actionLock.current = true;
     try {
       svcPause();
-      if (currentAudio) {
+      const audio = currentAudioRef.current;
+      if (audio) {
         const posMs = Math.round((playerRef.current.currentTime ?? 0) * 1_000);
-        savePlaybackPosition(currentAudio.id, posMs).catch(() => {});
+        if (posMs >= 0) {
+          lastPersist.current = Date.now();
+          savePlaybackPosition(audio.id, posMs).catch(() => {});
+        }
       }
     } catch (err) {
       console.warn('[AudioContext] pause failed:', err);
+    } finally {
+      setTimeout(() => { actionLock.current = false; }, 120);
     }
-  }, [currentAudio]);
+  }, []);
 
   const seek = useCallback(async (seconds) => {
+    const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
     try {
-      await svcSeekTo(seconds);
+      const p = playerRef.current;
+      const dur = p?.duration ?? 0;
+      const clamped = dur > 0 ? Math.min(safe, dur) : safe;
+      await svcSeekTo(clamped);
+      const audio = currentAudioRef.current;
+      if (audio) {
+        lastPersist.current = Date.now();
+        savePlaybackPosition(audio.id, Math.round(clamped * 1_000)).catch(() => {});
+      }
     } catch (err) {
       console.warn('[AudioContext] seek failed:', err);
     }
@@ -167,39 +213,70 @@ export function AudioProvider({ children }) {
   const stop = useCallback(async () => {
     try {
       await svcStop();
-      if (currentAudio) savePlaybackPosition(currentAudio.id, 0).catch(() => {});
+      const audio = currentAudioRef.current;
+      if (audio) savePlaybackPosition(audio.id, 0).catch(() => {});
     } catch (err) {
       console.warn('[AudioContext] stop failed:', err);
     }
-  }, [currentAudio]);
-
-  const setSpeed = useCallback((rate) => {
-    setPlaybackRate(rate);
-    svcSetRate(rate);
-    AsyncStorage.setItem(SPEED_STORAGE_KEY, String(rate)).catch(() => {});
   }, []);
 
-  const stableValue = {
+  const setSpeed = useCallback((rate) => {
+    const safe = Math.max(0.5, Math.min(Number(rate) || 1, 2));
+    setPlaybackRate(safe);
+    try {
+      svcSetRate(safe);
+    } catch (err) {
+      console.warn('[AudioContext] setSpeed failed:', err);
+    }
+    AsyncStorage.setItem(SPEED_STORAGE_KEY, String(safe)).catch(() => {});
+  }, []);
+
+  const clearAudioError = useCallback(() => setAudioError(null), []);
+
+  const isPlaying = status.playing ?? false;
+
+  // Stable value only changes on track / play state / speed / error — not on time ticks
+  const stableValue = useMemo(() => ({
     currentAudio,
     audioLoading,
     audioError,
     playbackRate,
-    clearAudioError: () => setAudioError(null),
+    isPlaying,
+    clearAudioError,
     loadAudio,
     play,
     pause,
     seek,
     stop,
     setSpeed,
-  };
+  }), [
+    currentAudio,
+    audioLoading,
+    audioError,
+    playbackRate,
+    isPlaying,
+    clearAudioError,
+    loadAudio,
+    play,
+    pause,
+    seek,
+    stop,
+    setSpeed,
+  ]);
 
-  const liveValue = {
-    isPlaying: status.playing ?? false,
+  const liveValue = useMemo(() => ({
+    isPlaying,
     isBuffering: status.isBuffering ?? false,
     didJustFinish: status.didJustFinish ?? false,
     currentTime: status.currentTime ?? 0,
     duration: status.duration ?? 0,
-  };
+  }), [
+    isPlaying,
+    status.isBuffering,
+    status.didJustFinish,
+    status.currentTime,
+    status.duration,
+  ]);
 
   return (
     <AudioStableContext.Provider value={stableValue}>
@@ -210,12 +287,11 @@ export function AudioProvider({ children }) {
   );
 }
 
-// Stable state + commands. Safe in list rows (does not tick with playback time).
+// Stable state only — safe in list rows (does not re-render on time ticks).
 export function useAudio() {
   const stable = useContext(AudioStableContext);
-  const live = useContext(AudioLiveContext);
   if (!stable) throw new Error('useAudio must be used within AudioProvider');
-  return { ...stable, isPlaying: live.isPlaying };
+  return stable;
 }
 
 // Full live state for the player UI. Re-renders while audio plays.
