@@ -1,4 +1,5 @@
 import { Asset } from 'expo-asset';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   memo,
@@ -28,7 +29,7 @@ import { getAudioById } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// PDF URI is cached at module level so switching lessons does not re-download it
+// Bundled book + module-level URI cache (resolved once per app session)
 const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
 let _cachedPdfUri = null;
 
@@ -56,11 +57,11 @@ function fmt(sec) {
 }
 
 function clampPage(raw, totalPages) {
-  if (raw == null || !Number.isInteger(Number(raw))) return 1;
   const n = Number(raw);
-  if (n < 1) return 1;
-  if (totalPages > 0) return Math.min(n, totalPages);
-  return n;
+  if (!Number.isFinite(n) || n < 1) return 1;
+  const page = Math.floor(n);
+  if (totalPages > 0) return Math.min(page, totalPages);
+  return page;
 }
 
 export default function ReaderScreen() {
@@ -79,14 +80,18 @@ export default function ReaderScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
 
-  const pdfRef = useRef(null);
   const loadedAudioIdRef = useRef(null);
-  const lastPageForAudioRef = useRef(null);
 
-  // Stable source object so Pdf does not see a new prop every parent render
+  // Stable source identity — avoids Pdf treating every parent render as a new file
   const pdfSource = useMemo(
     () => (pdfUri ? { uri: pdfUri, cache: true } : null),
     [pdfUri]
+  );
+
+  // Lesson start page only — NOT the live scroll position (must not force-jump while reading)
+  const openPage = useMemo(
+    () => clampPage(audio?.pdf_page, totalPages),
+    [audio?.id, audio?.pdf_page, totalPages]
   );
 
   const resolvePdf = useCallback(async (cancelRef) => {
@@ -122,51 +127,27 @@ export default function ReaderScreen() {
     return () => { cancelRef.current = true; };
   }, [resolvePdf]);
 
-  // Load / switch audio when the lesson id changes (not on every audio object identity)
   const { loadAudio } = useAudio();
   useEffect(() => {
     if (!audio?.id) return;
     if (loadedAudioIdRef.current === audio.id) return;
     loadedAudioIdRef.current = audio.id;
-    lastPageForAudioRef.current = null;
+    setCurrentPage(clampPage(audio.pdf_page, 0));
     loadAudio(audio, audio.position_ms ?? 0);
   }, [audio, loadAudio]);
 
-  // Jump PDF to this lesson's page once PDF is ready (and when lesson changes)
-  const goToAudioPage = useCallback((audioRecord, pages) => {
-    if (!audioRecord || !pages) return;
-    const target = clampPage(audioRecord.pdf_page, pages);
-    if (lastPageForAudioRef.current === `${audioRecord.id}:${target}`) return;
-    lastPageForAudioRef.current = `${audioRecord.id}:${target}`;
-    setCurrentPage(target);
-    // setPage after a short beat so the native view is ready
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        try {
-          pdfRef.current?.setPage?.(target);
-        } catch (err) {
-          console.warn('[ReaderScreen] setPage failed:', err);
-        }
-      }, 50);
-    });
-  }, []);
-
-  const handlePdfLoadComplete = useCallback((pages) => {
-    const total = typeof pages === 'number' ? pages : (pages?.numberOfPages ?? 0);
+  const handlePdfLoadComplete = useCallback((numberOfPages) => {
+    const total = typeof numberOfPages === 'number'
+      ? numberOfPages
+      : (numberOfPages?.numberOfPages ?? 0);
     setTotalPages(total);
     setPdfReady(true);
-    if (audio) goToAudioPage(audio, total);
-  }, [audio, goToAudioPage]);
-
-  // If PDF already loaded and user opens another lesson, only change page
-  useEffect(() => {
-    if (!audio || !pdfReady || totalPages <= 0) return;
-    goToAudioPage(audio, totalPages);
-  }, [audio?.id, pdfReady, totalPages, goToAudioPage, audio]);
+  }, []);
 
   const handlePdfPageChanged = useCallback((page) => {
     const p = typeof page === 'number' ? page : page?.page ?? page;
-    if (typeof p === 'number' && p >= 1) setCurrentPage(p);
+    if (typeof p !== 'number' || p < 1) return;
+    setCurrentPage((prev) => (prev === p ? prev : p));
   }, []);
 
   const handlePdfError = useCallback((err) => {
@@ -175,7 +156,17 @@ export default function ReaderScreen() {
     setPdfReady(false);
   }, []);
 
-  const showLoading = (audioLoading || pdfResolving || (pdfUri && !pdfReady)) && !pdfError;
+  const handlePdfRetry = useCallback(() => {
+    setPdfUri(null);
+    setPdfReady(false);
+    setPdfError(null);
+    setTotalPages(0);
+    _cachedPdfUri = null;
+    resolvePdf({ current: false });
+  }, [resolvePdf]);
+
+  // PDF loading only — audio has its own indicator in the player bar
+  const showPdfLoading = !pdfError && (pdfResolving || (pdfUri && !pdfReady));
   const rangeLabel = audio
     ? formatHadithRange(audio.hadith_number_from, audio.hadith_number_to)
     : null;
@@ -198,7 +189,7 @@ export default function ReaderScreen() {
 
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {audio?.title ?? 'Opening lesson…'}
+              {audio?.title ?? (audioLoading ? 'Opening lesson…' : 'Lesson')}
             </Text>
             {rangeLabel ? (
               <Text style={styles.headerSub} numberOfLines={1}>{rangeLabel}</Text>
@@ -208,8 +199,8 @@ export default function ReaderScreen() {
           <View style={styles.headerRight}>
             {totalPages > 0 ? (
               <View style={styles.pageBadge}>
-                <Text style={styles.pageCounter}>
-                  {currentPage} / {totalPages}
+                <Text style={styles.pageCounter} numberOfLines={1}>
+                  Page {currentPage} / {totalPages}
                 </Text>
               </View>
             ) : (
@@ -220,41 +211,27 @@ export default function ReaderScreen() {
       </SafeAreaView>
 
       <View style={styles.pdfArea}>
-        {showLoading && (
-          <View style={styles.loadingOverlay} pointerEvents="none">
-            <View style={styles.loadingCard}>
+        {showPdfLoading && (
+          <Modal transparent animationType="none" visible={showPdfLoading} statusBarTranslucent onRequestClose={() => { }}>
+            <View style={styles.loadingOverlay} pointerEvents="none">
               <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={styles.loadingTitle}>Opening the lesson…</Text>
-              <Text style={styles.loadingSub}>Preparing the book and audio</Text>
+              <Text style={styles.loadingTitle}>Opening the book…</Text>
             </View>
-          </View>
+          </Modal>
         )}
 
         {pdfError ? (
-          <PdfErrorView
-            error={pdfError}
-            onRetry={() => {
-              setPdfUri(null);
-              setPdfReady(false);
-              _cachedPdfUri = null;
-              resolvePdf({ current: false });
-            }}
-          />
-        ) : Pdf && pdfSource ? (
-          <Pdf
-            ref={pdfRef}
+          <PdfErrorView error={pdfError} onRetry={handlePdfRetry} />
+        ) : (
+          <BookPdf
             source={pdfSource}
-            style={styles.pdf}
+            openPage={openPage}
+            openKey={audio?.id ?? 0}
             onLoadComplete={handlePdfLoadComplete}
             onPageChanged={handlePdfPageChanged}
             onError={handlePdfError}
-            enablePaging={false}
-            horizontal={false}
-            enableAnnotationRendering={false}
-            trustAllCerts={false}
-            spacing={8}
           />
-        ) : null}
+        )}
       </View>
 
       <View style={[styles.playerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -273,6 +250,76 @@ export default function ReaderScreen() {
     </View>
   );
 }
+
+// Memoized native PDF: parent page-counter / play-pause re-renders must not touch it.
+// openPage = lesson pdf_page only (never the live scroll position).
+const BookPdf = memo(function BookPdf({
+  source,
+  openPage,
+  openKey,
+  onLoadComplete,
+  onPageChanged,
+  onError,
+}) {
+  const pdfRef = useRef(null);
+  const readyRef = useRef(false);
+  const lastOpenKeyRef = useRef(null);
+  const openPageRef = useRef(openPage);
+  const openKeyRef = useRef(openKey);
+  const onLoadCompleteRef = useRef(onLoadComplete);
+
+  openPageRef.current = openPage;
+  openKeyRef.current = openKey;
+  onLoadCompleteRef.current = onLoadComplete;
+
+  const jumpToOpenPage = useCallback((page) => {
+    try {
+      pdfRef.current?.setPage?.(clampPage(page, 0));
+    } catch (err) {
+      console.warn('[BookPdf] setPage failed:', err);
+    }
+  }, []);
+
+  // Lesson change while document already loaded → one jump, then free scroll
+  useEffect(() => {
+    if (!readyRef.current) return;
+    if (lastOpenKeyRef.current === openKey) return;
+    lastOpenKeyRef.current = openKey;
+    jumpToOpenPage(openPage);
+  }, [openKey, openPage, jumpToOpenPage]);
+
+  const handleLoadComplete = useCallback((numberOfPages, ...rest) => {
+    readyRef.current = true;
+    lastOpenKeyRef.current = openKeyRef.current;
+    onLoadCompleteRef.current?.(numberOfPages, ...rest);
+    requestAnimationFrame(() => jumpToOpenPage(openPageRef.current));
+  }, [jumpToOpenPage]);
+
+  if (!Pdf || !source) return null;
+
+  return (
+    <Pdf
+      ref={pdfRef}
+      source={source}
+      style={styles.pdf}
+      page={clampPage(openPage, 0)}
+      onLoadComplete={handleLoadComplete}
+      onPageChanged={onPageChanged}
+      onError={onError}
+      horizontal={false}
+      enablePaging={false}
+      enableAnnotationRendering={false}
+      enableDoubleTapZoom
+      trustAllCerts={false}
+      fitPolicy={0}
+      minScale={1}
+      maxScale={4}
+      spacing={6}
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
+    />
+  );
+});
 
 // Live ticks stay inside PlayerBar — PDF / shell do not re-render on time updates
 const PlayerBar = memo(function PlayerBar({ audio }) {
@@ -561,9 +608,12 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           {buffering ? (
             <ActivityIndicator color={colors.hero} size="small" />
           ) : (
-            <Text style={[pl.playIcon, !playing && pl.playIconOffset]}>
-              {playing ? '⏸' : '▶'}
-            </Text>
+            <Ionicons
+              name={playing ? 'pause' : 'play'}
+              size={28}
+              color={colors.heroDark}
+              style={!playing && pl.playIconOffset}
+            />
           )}
         </TouchableOpacity>
 
@@ -633,6 +683,8 @@ const SpeedSheet = memo(function SpeedSheet({ visible, current, onSelect, onClos
 });
 
 function PdfErrorView({ error, onRetry }) {
+  if (error) console.error('[PdfErrorView]', error);
+
   const msg = error?.message ?? '';
   const isNative =
     msg.includes('NativeModule') ||
@@ -641,14 +693,11 @@ function PdfErrorView({ error, onRetry }) {
 
   return (
     <View style={styles.pdfError}>
-      <Text style={styles.pdfErrorIcon}>📄</Text>
-      <Text style={styles.pdfErrorTitle}>
-        {isNative ? 'PDF viewer is not available' : 'Could not open the book'}
-      </Text>
+      <Text style={styles.pdfErrorTitle}>Unable to open the book.</Text>
       <Text style={styles.pdfErrorBody}>
         {isNative
-          ? 'Please rebuild the development client and try again.'
-          : 'The book could not be opened. Please try again.'}
+          ? 'The PDF viewer needs a development build. Please rebuild and try again.'
+          : 'Please check your connection and try again.'}
       </Text>
       {!isNative && onRetry ? (
         <TouchableOpacity
@@ -658,7 +707,7 @@ function PdfErrorView({ error, onRetry }) {
           accessibilityLabel="Try again"
           accessibilityRole="button"
         >
-          <Text style={styles.pdfRetryText}>Try again</Text>
+          <Text style={styles.pdfRetryText}>Try Again</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -712,17 +761,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerRight: {
-    minWidth: 56,
+    minWidth: 72,
+    maxWidth: 110,
     alignItems: 'flex-end',
     justifyContent: 'center',
     paddingRight: spacing.sm,
   },
-  headerRightSpacer: { width: 56 },
+  headerRightSpacer: { width: 72 },
   pageBadge: {
     backgroundColor: 'rgba(255,255,255,0.12)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
+    maxWidth: '100%',
   },
   pageCounter: {
     fontSize: 11,
@@ -732,36 +783,24 @@ const styles = StyleSheet.create({
   },
   pdfArea: {
     flex: 1,
-    backgroundColor: '#E8E8E6',
+    backgroundColor: '#EDEDE9',
   },
   pdf: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#E8E8E6',
+    backgroundColor: '#EDEDE9',
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.backgroundSecondary,
+    flex: 1,
+    backgroundColor: '#EDEDE9',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
-  },
-  loadingCard: {
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.lg,
+    gap: spacing.md,
   },
   loadingTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: spacing.md,
-    textAlign: 'center',
-  },
-  loadingSub: {
-    fontSize: 13,
+    fontSize: 15,
+    fontWeight: '500',
     color: colors.textMuted,
-    marginTop: spacing.xs,
     textAlign: 'center',
   },
   pdfError: {
@@ -771,7 +810,6 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     backgroundColor: colors.background,
   },
-  pdfErrorIcon: { fontSize: 40, marginBottom: spacing.md },
   pdfErrorTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -780,10 +818,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   pdfErrorBody: {
-    fontSize: 13,
+    fontSize: 14,
     color: colors.textMuted,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
     marginBottom: spacing.lg,
   },
   pdfRetryBtn: {
@@ -805,7 +843,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    // Lift slightly over the PDF edge
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.18,
@@ -832,7 +869,7 @@ const pl = StyleSheet.create({
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
     gap: spacing.sm,
   },
   trackInfo: {
@@ -870,9 +907,9 @@ const pl = StyleSheet.create({
   },
   // Tall hit area; visible track is thinner inside
   trackWrap: {
-    height: 44,
+    height: 36,
     justifyContent: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     position: 'relative',
   },
   trackBg: {
@@ -920,8 +957,8 @@ const pl = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   skipBtn: {
-    minWidth: 56,
-    minHeight: 48,
+    minWidth: 44,
+    minHeight: 33,
     borderRadius: 24,
     backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
@@ -936,9 +973,9 @@ const pl = StyleSheet.create({
     letterSpacing: 0.3,
   },
   playBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.heroText,
     alignItems: 'center',
     justifyContent: 'center',
@@ -950,11 +987,6 @@ const pl = StyleSheet.create({
   },
   playBtnActive: {
     backgroundColor: colors.gold,
-  },
-  playIcon: {
-    fontSize: 26,
-    color: colors.heroDark,
-    fontWeight: '700',
   },
   playIconOffset: {
     marginLeft: 3,

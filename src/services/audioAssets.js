@@ -21,6 +21,16 @@ const AUDIO_ASSETS = {
   '018.mp3': require('../../assets/audio/018.mp3'),
   '019.mp3': require('../../assets/audio/019.mp3'),
   '020.mp3': require('../../assets/audio/020.mp3'),
+  '021.mp3': require('../../assets/audio/021.mp3'),
+  '022.mp3': require('../../assets/audio/022.mp3'),
+  '023.mp3': require('../../assets/audio/023.mp3'),
+  '024.mp3': require('../../assets/audio/024.mp3'),
+  '025.mp3': require('../../assets/audio/025.mp3'),
+  '026.mp3': require('../../assets/audio/026.mp3'),
+  '027.mp3': require('../../assets/audio/027.mp3'),
+  '028.mp3': require('../../assets/audio/028.mp3'),
+  '029.mp3': require('../../assets/audio/029.mp3'),
+  '030.mp3': require('../../assets/audio/030.mp3'),
 };
 
 export function resolveAudioSource(filename) {
