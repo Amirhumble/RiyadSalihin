@@ -39,7 +39,14 @@ let _lastNativePdfReleaseAt = 0;
 let _lastPdfSessionCompleted = true;
 const NATIVE_RELEASE_MS = 120;
 const NATIVE_ABORT_RELEASE_MS = 320;
-const PDF_LOAD_TIMEOUT_MS = 20_000;
+// Hide the overlay if the document is loaded but the jump to pdf_page
+// has not been confirmed. Must NOT unmount <Pdf> — that aborts a still-
+// running first-time page decode (the previous 20s error timeout).
+const PAGE_SETTLE_MS = 12_000;
+// Always open the native document at page 1. A high `page` prop becomes
+// defaultPage(N) and AndroidPdfViewer will not fire onLoadComplete until
+// that (possibly never-cached) page is measured/rendered.
+const NATIVE_OPEN_PAGE = 1;
 
 let Pdf = null;
 let pdfModuleError = null;
@@ -88,6 +95,7 @@ export default function ReaderScreen() {
   const [pdfUri, setPdfUri] = useState(getCachedPdfUri);
   const [pdfResolving, setPdfResolving] = useState(() => !getCachedPdfUri());
   const [pdfReady, setPdfReady] = useState(false);
+  const [pageReady, setPageReady] = useState(false);
   const [pdfError, setPdfError] = useState(pdfModuleError);
   const [currentPage, setCurrentPage] = useState(paramPage || 1);
   const [totalPages, setTotalPages] = useState(0);
@@ -96,6 +104,7 @@ export default function ReaderScreen() {
   const [pdfMountId, setPdfMountId] = useState(0);
 
   const loadedAudioIdRef = useRef(null);
+  const openPageRef = useRef(1);
 
   // Local file URI — cache:false skips react-native-pdf's extra blob-util stat/copy.
   const pdfSource = useMemo(
@@ -104,13 +113,13 @@ export default function ReaderScreen() {
   );
 
   // Lesson start page only — NOT the live scroll position.
-  // Prefer DB once loaded; fall back to the list-provided param so <Pdf>
-  // can mount with the correct initial page (changing `page` later reloads
-  // the whole document — see BookPdf).
+  // Used for setPage() after the document loads. Never passed as the
+  // native `page` prop (that reloads the whole document).
   const openPage = useMemo(
     () => clampPage(audio?.pdf_page ?? paramPage, 0),
     [audio?.id, audio?.pdf_page, paramPage]
   );
+  openPageRef.current = openPage;
 
   const hasTargetPage = Boolean(audio?.id || paramPage);
 
@@ -176,14 +185,14 @@ export default function ReaderScreen() {
     !pdfError && pdfSource && hasTargetPage && slotReady && nativeOk
   );
 
+  // Document is open but the lesson page may still be rendering for the
+  // first time. Never convert that wait into an error — unmounting <Pdf>
+  // cancels Pdfium mid-decode and is what produced the timeout screen.
   useEffect(() => {
-    if (!canMountPdf || pdfReady || pdfError) return undefined;
-    const timeoutId = setTimeout(() => {
-      setPdfError(new Error('The book took too long to open.'));
-      setPdfReady(false);
-    }, PDF_LOAD_TIMEOUT_MS);
+    if (!pdfReady || pageReady) return undefined;
+    const timeoutId = setTimeout(() => setPageReady(true), PAGE_SETTLE_MS);
     return () => clearTimeout(timeoutId);
-  }, [canMountPdf, pdfReady, pdfError, pdfMountId]);
+  }, [pdfReady, pageReady, pdfMountId]);
 
   const handlePdfLoadComplete = useCallback((numberOfPages) => {
     const total = typeof numberOfPages === 'number'
@@ -191,12 +200,14 @@ export default function ReaderScreen() {
       : (numberOfPages?.numberOfPages ?? 0);
     setTotalPages(total);
     setPdfReady(true);
+    if (openPageRef.current <= NATIVE_OPEN_PAGE) setPageReady(true);
   }, []);
 
   const handlePdfPageChanged = useCallback((page) => {
     const p = typeof page === 'number' ? page : page?.page ?? page;
     if (typeof p !== 'number' || p < 1) return;
     setCurrentPage((prev) => (prev === p ? prev : p));
+    if (p === openPageRef.current) setPageReady(true);
   }, []);
 
   const handlePdfError = useCallback((err) => {
@@ -207,6 +218,7 @@ export default function ReaderScreen() {
 
   const handlePdfRetry = useCallback(() => {
     setPdfReady(false);
+    setPageReady(false);
     setPdfError(null);
     setTotalPages(0);
     setNativeOk(false);
@@ -221,7 +233,9 @@ export default function ReaderScreen() {
   }, [resolvePdf]);
 
   // PDF loading only — audio has its own indicator in the player bar
-  const showPdfLoading = !pdfError && (pdfResolving || !canMountPdf || !pdfReady);
+  const showPdfLoading = !pdfError && (
+    pdfResolving || !canMountPdf || !pdfReady || !pageReady
+  );
   const rangeLabel = audio
     ? formatHadithRange(audio.hadith_number_from, audio.hadith_number_to)
     : null;
@@ -284,12 +298,18 @@ export default function ReaderScreen() {
           />
         ) : null}
 
-        {showPdfLoading ? (
+        <Modal
+          visible={showPdfLoading}
+          transparent
+          animationType="none"
+          statusBarTranslucent
+          onRequestClose={() => {}}
+        >
           <View style={styles.loadingOverlay} pointerEvents="none">
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingTitle}>Opening the book…</Text>
           </View>
-        ) : null}
+        </Modal>
       </View>
 
       <View style={[styles.playerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -314,7 +334,7 @@ export default function ReaderScreen() {
 // CRITICAL: react-native-pdf Android calls drawPdf() on EVERY native prop update
 // (PdfManager.onAfterUpdateTransaction). Changing the `page` prop therefore
 // re-parses the entire book and can deadlock Pdfium if a previous decode is live.
-// Freeze `page` at first mount; later jumps go through setPage() only.
+// Always mount at page 1; jump to the lesson page with setPage() after load.
 const BookPdf = memo(function BookPdf({
   source,
   openPage,
@@ -330,7 +350,7 @@ const BookPdf = memo(function BookPdf({
   const openPageRef = useRef(openPage);
   const openKeyRef = useRef(openKey);
   const onLoadCompleteRef = useRef(onLoadComplete);
-  const frozenPageRef = useRef(clampPage(openPage, 0));
+  const frozenPageRef = useRef(NATIVE_OPEN_PAGE);
 
   openPageRef.current = openPage;
   openKeyRef.current = openKey;
@@ -367,7 +387,7 @@ const BookPdf = memo(function BookPdf({
     lastOpenPageRef.current = openPageRef.current;
     onLoadCompleteRef.current?.(numberOfPages, ...rest);
     const target = clampPage(openPageRef.current, 0);
-    if (target !== frozenPageRef.current) {
+    if (target !== NATIVE_OPEN_PAGE) {
       requestAnimationFrame(() => jumpToOpenPage(target));
     }
   }, [jumpToOpenPage]);
@@ -872,12 +892,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#EDEDE9',
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
     backgroundColor: '#EDEDE9',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
-    zIndex: 2,
   },
   loadingTitle: {
     fontSize: 15,
