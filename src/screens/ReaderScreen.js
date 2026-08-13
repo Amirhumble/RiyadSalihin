@@ -1,4 +1,3 @@
-import { Asset } from 'expo-asset';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -27,11 +26,20 @@ import spacing from '@/constants/spacing';
 import { useAudio, useAudioPlayer } from '@/context/AudioContext';
 import { getAudioById } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import {
+  getCachedPdfUri,
+  preparePdfAsset,
+  resetPdfAssetCache,
+} from '@/services/pdfAsset';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
-// Bundled book + module-level URI cache (resolved once per app session)
-const PDF_MODULE = require('../../assets/pdf/riyad-as-salihin.pdf');
-let _cachedPdfUri = null;
+// Native Pdfium must finish tearing down before the next <Pdf> mounts.
+// Opening Audio B immediately after Back otherwise races the previous decoder.
+let _lastNativePdfReleaseAt = 0;
+let _lastPdfSessionCompleted = true;
+const NATIVE_RELEASE_MS = 120;
+const NATIVE_ABORT_RELEASE_MS = 320;
+const PDF_LOAD_TIMEOUT_MS = 20_000;
 
 let Pdf = null;
 let pdfModuleError = null;
@@ -67,48 +75,58 @@ function clampPage(raw, totalPages) {
 export default function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { audioId } = useLocalSearchParams();
+  const { audioId, pdfPage: pdfPageParam } = useLocalSearchParams();
   const id = Number(audioId);
+  const rawPageParam = Array.isArray(pdfPageParam) ? pdfPageParam[0] : pdfPageParam;
+  const paramPage = rawPageParam != null && rawPageParam !== ''
+    ? clampPage(rawPageParam, 0)
+    : 0;
 
   const { data: audio, loading: audioLoading, error: audioDbError } =
     useDbQuery(() => getAudioById(id), [id]);
 
-  const [pdfUri, setPdfUri] = useState(_cachedPdfUri);
-  const [pdfResolving, setPdfResolving] = useState(!_cachedPdfUri);
+  const [pdfUri, setPdfUri] = useState(getCachedPdfUri);
+  const [pdfResolving, setPdfResolving] = useState(() => !getCachedPdfUri());
   const [pdfReady, setPdfReady] = useState(false);
   const [pdfError, setPdfError] = useState(pdfModuleError);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(paramPage || 1);
   const [totalPages, setTotalPages] = useState(0);
+  const [slotReady, setSlotReady] = useState(false);
+  const [nativeOk, setNativeOk] = useState(false);
+  const [pdfMountId, setPdfMountId] = useState(0);
 
   const loadedAudioIdRef = useRef(null);
 
-  // Stable source identity — avoids Pdf treating every parent render as a new file
+  // Local file URI — cache:false skips react-native-pdf's extra blob-util stat/copy.
   const pdfSource = useMemo(
-    () => (pdfUri ? { uri: pdfUri, cache: true } : null),
+    () => (pdfUri ? { uri: pdfUri, cache: false } : null),
     [pdfUri]
   );
 
-  // Lesson start page only — NOT the live scroll position (must not force-jump while reading)
+  // Lesson start page only — NOT the live scroll position.
+  // Prefer DB once loaded; fall back to the list-provided param so <Pdf>
+  // can mount with the correct initial page (changing `page` later reloads
+  // the whole document — see BookPdf).
   const openPage = useMemo(
-    () => clampPage(audio?.pdf_page, totalPages),
-    [audio?.id, audio?.pdf_page, totalPages]
+    () => clampPage(audio?.pdf_page ?? paramPage, 0),
+    [audio?.id, audio?.pdf_page, paramPage]
   );
 
+  const hasTargetPage = Boolean(audio?.id || paramPage);
+
   const resolvePdf = useCallback(async (cancelRef) => {
-    if (_cachedPdfUri) {
-      setPdfUri(_cachedPdfUri);
+    const cached = getCachedPdfUri();
+    if (cached) {
+      setPdfUri(cached);
       setPdfResolving(false);
       return;
     }
     try {
       setPdfResolving(true);
       setPdfError(null);
-      const asset = Asset.fromModule(PDF_MODULE);
-      await asset.downloadAsync();
+      const uri = await preparePdfAsset();
       if (cancelRef?.current) return;
-      if (!asset.localUri) throw new Error('PDF could not be prepared.');
-      _cachedPdfUri = asset.localUri;
-      setPdfUri(asset.localUri);
+      setPdfUri(uri);
     } catch (err) {
       console.error('[ReaderScreen] PDF asset error:', err);
       if (!cancelRef?.current) setPdfError(err);
@@ -136,6 +154,37 @@ export default function ReaderScreen() {
     loadAudio(audio, audio.position_ms ?? 0);
   }, [audio, loadAudio]);
 
+  const handlePdfAreaLayout = useCallback((event) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) setSlotReady(true);
+  }, []);
+
+  // Wait for the previous native PdfView to release before mounting a new one.
+  useEffect(() => {
+    if (!pdfUri || !hasTargetPage || !slotReady) {
+      setNativeOk(false);
+      return undefined;
+    }
+    const elapsed = Date.now() - _lastNativePdfReleaseAt;
+    const needed = _lastPdfSessionCompleted ? NATIVE_RELEASE_MS : NATIVE_ABORT_RELEASE_MS;
+    const wait = elapsed < 800 ? Math.max(0, needed - elapsed) : 0;
+    const timeoutId = setTimeout(() => setNativeOk(true), wait);
+    return () => clearTimeout(timeoutId);
+  }, [pdfUri, hasTargetPage, slotReady, pdfMountId]);
+
+  const canMountPdf = Boolean(
+    !pdfError && pdfSource && hasTargetPage && slotReady && nativeOk
+  );
+
+  useEffect(() => {
+    if (!canMountPdf || pdfReady || pdfError) return undefined;
+    const timeoutId = setTimeout(() => {
+      setPdfError(new Error('The book took too long to open.'));
+      setPdfReady(false);
+    }, PDF_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timeoutId);
+  }, [canMountPdf, pdfReady, pdfError, pdfMountId]);
+
   const handlePdfLoadComplete = useCallback((numberOfPages) => {
     const total = typeof numberOfPages === 'number'
       ? numberOfPages
@@ -157,16 +206,22 @@ export default function ReaderScreen() {
   }, []);
 
   const handlePdfRetry = useCallback(() => {
-    setPdfUri(null);
     setPdfReady(false);
     setPdfError(null);
     setTotalPages(0);
-    _cachedPdfUri = null;
+    setNativeOk(false);
+    setPdfMountId((n) => n + 1);
+    if (getCachedPdfUri()) {
+      setPdfUri(getCachedPdfUri());
+      return;
+    }
+    resetPdfAssetCache();
+    setPdfUri(null);
     resolvePdf({ current: false });
   }, [resolvePdf]);
 
   // PDF loading only — audio has its own indicator in the player bar
-  const showPdfLoading = !pdfError && (pdfResolving || (pdfUri && !pdfReady));
+  const showPdfLoading = !pdfError && (pdfResolving || !canMountPdf || !pdfReady);
   const rangeLabel = audio
     ? formatHadithRange(audio.hadith_number_from, audio.hadith_number_to)
     : null;
@@ -210,28 +265,31 @@ export default function ReaderScreen() {
         </View>
       </SafeAreaView>
 
-      <View style={styles.pdfArea}>
-        {showPdfLoading && (
-          <Modal transparent animationType="none" visible={showPdfLoading} statusBarTranslucent onRequestClose={() => { }}>
-            <View style={styles.loadingOverlay} pointerEvents="none">
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={styles.loadingTitle}>Opening the book…</Text>
-            </View>
-          </Modal>
-        )}
-
+      <View
+        style={styles.pdfArea}
+        onLayout={handlePdfAreaLayout}
+        collapsable={false}
+      >
         {pdfError ? (
           <PdfErrorView error={pdfError} onRetry={handlePdfRetry} />
-        ) : (
+        ) : canMountPdf ? (
           <BookPdf
+            key={pdfMountId}
             source={pdfSource}
             openPage={openPage}
-            openKey={audio?.id ?? 0}
+            openKey={audio?.id ?? id ?? 0}
             onLoadComplete={handlePdfLoadComplete}
             onPageChanged={handlePdfPageChanged}
             onError={handlePdfError}
           />
-        )}
+        ) : null}
+
+        {showPdfLoading ? (
+          <View style={styles.loadingOverlay} pointerEvents="none">
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingTitle}>Opening the book…</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.playerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -252,7 +310,11 @@ export default function ReaderScreen() {
 }
 
 // Memoized native PDF: parent page-counter / play-pause re-renders must not touch it.
-// openPage = lesson pdf_page only (never the live scroll position).
+//
+// CRITICAL: react-native-pdf Android calls drawPdf() on EVERY native prop update
+// (PdfManager.onAfterUpdateTransaction). Changing the `page` prop therefore
+// re-parses the entire book and can deadlock Pdfium if a previous decode is live.
+// Freeze `page` at first mount; later jumps go through setPage() only.
 const BookPdf = memo(function BookPdf({
   source,
   openPage,
@@ -264,13 +326,20 @@ const BookPdf = memo(function BookPdf({
   const pdfRef = useRef(null);
   const readyRef = useRef(false);
   const lastOpenKeyRef = useRef(null);
+  const lastOpenPageRef = useRef(null);
   const openPageRef = useRef(openPage);
   const openKeyRef = useRef(openKey);
   const onLoadCompleteRef = useRef(onLoadComplete);
+  const frozenPageRef = useRef(clampPage(openPage, 0));
 
   openPageRef.current = openPage;
   openKeyRef.current = openKey;
   onLoadCompleteRef.current = onLoadComplete;
+
+  useEffect(() => () => {
+    _lastNativePdfReleaseAt = Date.now();
+    if (!readyRef.current) _lastPdfSessionCompleted = false;
+  }, []);
 
   const jumpToOpenPage = useCallback((page) => {
     try {
@@ -280,19 +349,27 @@ const BookPdf = memo(function BookPdf({
     }
   }, []);
 
-  // Lesson change while document already loaded → one jump, then free scroll
+  // Lesson change after the document is already loaded → one jump, then free scroll
   useEffect(() => {
     if (!readyRef.current) return;
-    if (lastOpenKeyRef.current === openKey) return;
+    if (lastOpenKeyRef.current === openKey && lastOpenPageRef.current === openPage) {
+      return;
+    }
     lastOpenKeyRef.current = openKey;
+    lastOpenPageRef.current = openPage;
     jumpToOpenPage(openPage);
   }, [openKey, openPage, jumpToOpenPage]);
 
   const handleLoadComplete = useCallback((numberOfPages, ...rest) => {
     readyRef.current = true;
+    _lastPdfSessionCompleted = true;
     lastOpenKeyRef.current = openKeyRef.current;
+    lastOpenPageRef.current = openPageRef.current;
     onLoadCompleteRef.current?.(numberOfPages, ...rest);
-    requestAnimationFrame(() => jumpToOpenPage(openPageRef.current));
+    const target = clampPage(openPageRef.current, 0);
+    if (target !== frozenPageRef.current) {
+      requestAnimationFrame(() => jumpToOpenPage(target));
+    }
   }, [jumpToOpenPage]);
 
   if (!Pdf || !source) return null;
@@ -302,10 +379,11 @@ const BookPdf = memo(function BookPdf({
       ref={pdfRef}
       source={source}
       style={styles.pdf}
-      page={clampPage(openPage, 0)}
+      page={frozenPageRef.current}
       onLoadComplete={handleLoadComplete}
       onPageChanged={onPageChanged}
       onError={onError}
+      renderActivityIndicator={() => null}
       horizontal={false}
       enablePaging={false}
       enableAnnotationRendering={false}
@@ -690,6 +768,7 @@ function PdfErrorView({ error, onRetry }) {
     msg.includes('NativeModule') ||
     msg.includes('RNPDFPdf') ||
     msg.includes('cannot be null');
+  const isTimeout = msg.includes('too long to open');
 
   return (
     <View style={styles.pdfError}>
@@ -697,7 +776,9 @@ function PdfErrorView({ error, onRetry }) {
       <Text style={styles.pdfErrorBody}>
         {isNative
           ? 'The PDF viewer needs a development build. Please rebuild and try again.'
-          : 'Please check your connection and try again.'}
+          : isTimeout
+            ? 'The book is taking longer than expected. Please try again.'
+            : 'Please try again.'}
       </Text>
       {!isNative && onRetry ? (
         <TouchableOpacity
@@ -791,11 +872,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#EDEDE9',
   },
   loadingOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#EDEDE9',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
+    zIndex: 2,
   },
   loadingTitle: {
     fontSize: 15,

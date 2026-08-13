@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect } from 'react';
 import {
   FlatList,
   StatusBar,
@@ -17,6 +17,7 @@ import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
 import { getAllAudios } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import { preparePdfAsset } from '@/services/pdfAsset';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
 function fmtMs(ms) {
@@ -41,6 +42,14 @@ export default function AudioListScreen() {
     []
   );
 
+  // Copy the bundled PDF to a local URI while the user browses the list.
+  // Does not mount <Pdf> — that stays in ReaderScreen.
+  useEffect(() => {
+    preparePdfAsset().catch((err) => {
+      console.warn('[AudioListScreen] PDF asset prep failed:', err);
+    });
+  }, []);
+
   // Refresh progress labels when returning from the reader (no full-screen flash)
   useFocusEffect(
     useCallback(() => {
@@ -49,7 +58,11 @@ export default function AudioListScreen() {
   );
 
   const handlePress = useCallback(
-    (audioId) => router.push(`/reader?audioId=${audioId}`),
+    (audio) => {
+      const page = Number(audio?.pdf_page);
+      const pdfPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+      router.push(`/reader?audioId=${audio.id}&pdfPage=${pdfPage}`);
+    },
     [router]
   );
 
@@ -153,7 +166,7 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
   return (
     <TouchableOpacity
       style={[styles.row, isActive && styles.rowActive]}
-      onPress={() => onPress(audio.id)}
+      onPress={() => onPress(audio)}
       activeOpacity={0.72}
       accessibilityRole="button"
       accessibilityLabel={`Lesson ${audio.ordering}: ${audio.title}`}
