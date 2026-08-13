@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
+import { preparePdfAsset } from '@/services/pdfAsset';
 
 const INTRO_DURATION_MS = 3000;
 
@@ -17,6 +18,11 @@ export default function IntroScreen() {
     const timer = setTimeout(() => router.replace('/list'), INTRO_DURATION_MS);
     return () => clearTimeout(timer);
   }, [router]);
+
+  // Start copying the bundled PDF during the intro (file only — no <Pdf> mount).
+  useEffect(() => {
+    preparePdfAsset().catch(() => {});
+  }, []);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
