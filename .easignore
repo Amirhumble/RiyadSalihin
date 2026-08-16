@@ -3,6 +3,7 @@ node_modules/
 .expo/
 .claude/
 .vscode/
+eas-archive-inspect/
 
 *.log
 npm-debug.log*
@@ -16,6 +17,5 @@ android/.gradle/
 android/build/
 android/app/build/
 
-# Development-only files
 __tests__/
 tests/
