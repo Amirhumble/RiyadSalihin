@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   memo,
   useCallback,
@@ -24,37 +24,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { useAudio, useAudioPlayer } from '@/context/AudioContext';
+import { clampPage, usePdfSession } from '@/context/PdfSessionContext';
 import { getAudioById } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
-import {
-  getCachedPdfUri,
-  preparePdfAsset,
-  resetPdfAssetCache,
-} from '@/services/pdfAsset';
 import { formatHadithRange } from '@/utils/formatHadithRange';
-
-// Native Pdfium must finish tearing down before the next <Pdf> mounts.
-// Opening Audio B immediately after Back otherwise races the previous decoder.
-let _lastNativePdfReleaseAt = 0;
-let _lastPdfSessionCompleted = true;
-const NATIVE_RELEASE_MS = 120;
-const NATIVE_ABORT_RELEASE_MS = 320;
-// Hide the overlay if the document is loaded but the jump to pdf_page
-// has not been confirmed. Must NOT unmount <Pdf> — that aborts a still-
-// running first-time page decode (the previous 20s error timeout).
-const PAGE_SETTLE_MS = 12_000;
-// Always open the native document at page 1. A high `page` prop becomes
-// defaultPage(N) and AndroidPdfViewer will not fire onLoadComplete until
-// that (possibly never-cached) page is measured/rendered.
-const NATIVE_OPEN_PAGE = 1;
-
-let Pdf = null;
-let pdfModuleError = null;
-try {
-  Pdf = require('react-native-pdf').default;
-} catch (err) {
-  pdfModuleError = err;
-}
 
 const SPEED_OPTIONS = [
   { rate: 0.75, label: '0.75×' },
@@ -71,14 +44,6 @@ function fmt(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function clampPage(raw, totalPages) {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return 1;
-  const page = Math.floor(n);
-  if (totalPages > 0) return Math.min(page, totalPages);
-  return page;
-}
-
 export default function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -92,25 +57,22 @@ export default function ReaderScreen() {
   const { data: audio, loading: audioLoading, error: audioDbError } =
     useDbQuery(() => getAudioById(id), [id]);
 
-  const [pdfUri, setPdfUri] = useState(getCachedPdfUri);
-  const [pdfResolving, setPdfResolving] = useState(() => !getCachedPdfUri());
-  const [pdfReady, setPdfReady] = useState(false);
-  const [pageReady, setPageReady] = useState(false);
-  const [pdfError, setPdfError] = useState(pdfModuleError);
-  const [currentPage, setCurrentPage] = useState(paramPage || 1);
-  const [totalPages, setTotalPages] = useState(0);
-  const [slotReady, setSlotReady] = useState(false);
-  const [nativeOk, setNativeOk] = useState(false);
-  const [pdfMountId, setPdfMountId] = useState(0);
+  const {
+    pdfResolving,
+    pdfReady,
+    pageReady,
+    pdfError,
+    currentPage,
+    totalPages,
+    present,
+    hide,
+    updateSlot,
+    retry,
+  } = usePdfSession();
 
   const loadedAudioIdRef = useRef(null);
-  const openPageRef = useRef(1);
-
-  // Local file URI — cache:false skips react-native-pdf's extra blob-util stat/copy.
-  const pdfSource = useMemo(
-    () => (pdfUri ? { uri: pdfUri, cache: false } : null),
-    [pdfUri]
-  );
+  const slotRef = useRef(null);
+  const [focused, setFocused] = useState(false);
 
   // Lesson start page only — NOT the live scroll position.
   // Used for setPage() after the document loads. Never passed as the
@@ -119,123 +81,50 @@ export default function ReaderScreen() {
     () => clampPage(audio?.pdf_page ?? paramPage, 0),
     [audio?.id, audio?.pdf_page, paramPage]
   );
-  openPageRef.current = openPage;
 
   const hasTargetPage = Boolean(audio?.id || paramPage);
-
-  const resolvePdf = useCallback(async (cancelRef) => {
-    const cached = getCachedPdfUri();
-    if (cached) {
-      setPdfUri(cached);
-      setPdfResolving(false);
-      return;
-    }
-    try {
-      setPdfResolving(true);
-      setPdfError(null);
-      const uri = await preparePdfAsset();
-      if (cancelRef?.current) return;
-      setPdfUri(uri);
-    } catch (err) {
-      console.error('[ReaderScreen] PDF asset error:', err);
-      if (!cancelRef?.current) setPdfError(err);
-    } finally {
-      if (!cancelRef?.current) setPdfResolving(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (pdfModuleError) {
-      setPdfResolving(false);
-      return;
-    }
-    const cancelRef = { current: false };
-    resolvePdf(cancelRef);
-    return () => { cancelRef.current = true; };
-  }, [resolvePdf]);
 
   const { loadAudio } = useAudio();
   useEffect(() => {
     if (!audio?.id) return;
     if (loadedAudioIdRef.current === audio.id) return;
     loadedAudioIdRef.current = audio.id;
-    setCurrentPage(clampPage(audio.pdf_page, 0));
     loadAudio(audio, audio.position_ms ?? 0);
   }, [audio, loadAudio]);
 
-  const handlePdfAreaLayout = useCallback((event) => {
-    const { width, height } = event.nativeEvent.layout;
-    if (width > 0 && height > 0) setSlotReady(true);
-  }, []);
+  const publishSlot = useCallback(() => {
+    slotRef.current?.measureInWindow?.((x, y, width, height) => {
+      if (width > 0 && height > 0) updateSlot({ x, y, width, height });
+    });
+  }, [updateSlot]);
 
-  // Wait for the previous native PdfView to release before mounting a new one.
-  useEffect(() => {
-    if (!pdfUri || !hasTargetPage || !slotReady) {
-      setNativeOk(false);
-      return undefined;
-    }
-    const elapsed = Date.now() - _lastNativePdfReleaseAt;
-    const needed = _lastPdfSessionCompleted ? NATIVE_RELEASE_MS : NATIVE_ABORT_RELEASE_MS;
-    const wait = elapsed < 800 ? Math.max(0, needed - elapsed) : 0;
-    const timeoutId = setTimeout(() => setNativeOk(true), wait);
-    return () => clearTimeout(timeoutId);
-  }, [pdfUri, hasTargetPage, slotReady, pdfMountId]);
+  const handlePdfAreaLayout = useCallback(() => {
+    publishSlot();
+  }, [publishSlot]);
 
-  const canMountPdf = Boolean(
-    !pdfError && pdfSource && hasTargetPage && slotReady && nativeOk
+  // Claim the process-wide Pdf host while this screen is focused.
+  // Back only hides it — it must not unmount <Pdf> / recycle Pdfium.
+  // present() is not in this effect: audio/openPage updates must not
+  // run hide() (the focus cleanup) and flash the host off-screen.
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      publishSlot();
+      return () => {
+        setFocused(false);
+        hide();
+      };
+    }, [hide, publishSlot])
   );
 
-  // Document is open but the lesson page may still be rendering for the
-  // first time. Never convert that wait into an error — unmounting <Pdf>
-  // cancels Pdfium mid-decode and is what produced the timeout screen.
   useEffect(() => {
-    if (!pdfReady || pageReady) return undefined;
-    const timeoutId = setTimeout(() => setPageReady(true), PAGE_SETTLE_MS);
-    return () => clearTimeout(timeoutId);
-  }, [pdfReady, pageReady, pdfMountId]);
-
-  const handlePdfLoadComplete = useCallback((numberOfPages) => {
-    const total = typeof numberOfPages === 'number'
-      ? numberOfPages
-      : (numberOfPages?.numberOfPages ?? 0);
-    setTotalPages(total);
-    setPdfReady(true);
-    if (openPageRef.current <= NATIVE_OPEN_PAGE) setPageReady(true);
-  }, []);
-
-  const handlePdfPageChanged = useCallback((page) => {
-    const p = typeof page === 'number' ? page : page?.page ?? page;
-    if (typeof p !== 'number' || p < 1) return;
-    setCurrentPage((prev) => (prev === p ? prev : p));
-    if (p === openPageRef.current) setPageReady(true);
-  }, []);
-
-  const handlePdfError = useCallback((err) => {
-    console.error('[ReaderScreen] PDF render error:', err);
-    setPdfError(err);
-    setPdfReady(false);
-  }, []);
-
-  const handlePdfRetry = useCallback(() => {
-    setPdfReady(false);
-    setPageReady(false);
-    setPdfError(null);
-    setTotalPages(0);
-    setNativeOk(false);
-    setPdfMountId((n) => n + 1);
-    if (getCachedPdfUri()) {
-      setPdfUri(getCachedPdfUri());
-      return;
-    }
-    resetPdfAssetCache();
-    setPdfUri(null);
-    resolvePdf({ current: false });
-  }, [resolvePdf]);
+    if (!focused || !hasTargetPage) return;
+    present({ openPage, openKey: audio?.id ?? id ?? 0 });
+    publishSlot();
+  }, [focused, hasTargetPage, openPage, audio?.id, id, present, publishSlot]);
 
   // PDF loading only — audio has its own indicator in the player bar
-  const showPdfLoading = !pdfError && (
-    pdfResolving || !canMountPdf || !pdfReady || !pageReady
-  );
+  const showPdfLoading = !pdfError && (pdfResolving || !pdfReady || !pageReady);
   const rangeLabel = audio
     ? formatHadithRange(audio.hadith_number_from, audio.hadith_number_to)
     : null;
@@ -280,22 +169,13 @@ export default function ReaderScreen() {
       </SafeAreaView>
 
       <View
+        ref={slotRef}
         style={styles.pdfArea}
         onLayout={handlePdfAreaLayout}
         collapsable={false}
       >
         {pdfError ? (
-          <PdfErrorView error={pdfError} onRetry={handlePdfRetry} />
-        ) : canMountPdf ? (
-          <BookPdf
-            key={pdfMountId}
-            source={pdfSource}
-            openPage={openPage}
-            openKey={audio?.id ?? id ?? 0}
-            onLoadComplete={handlePdfLoadComplete}
-            onPageChanged={handlePdfPageChanged}
-            onError={handlePdfError}
-          />
+          <PdfErrorView error={pdfError} onRetry={retry} />
         ) : null}
 
         <Modal
@@ -328,96 +208,6 @@ export default function ReaderScreen() {
     </View>
   );
 }
-
-// Memoized native PDF: parent page-counter / play-pause re-renders must not touch it.
-//
-// CRITICAL: react-native-pdf Android calls drawPdf() on EVERY native prop update
-// (PdfManager.onAfterUpdateTransaction). Changing the `page` prop therefore
-// re-parses the entire book and can deadlock Pdfium if a previous decode is live.
-// Always mount at page 1; jump to the lesson page with setPage() after load.
-const BookPdf = memo(function BookPdf({
-  source,
-  openPage,
-  openKey,
-  onLoadComplete,
-  onPageChanged,
-  onError,
-}) {
-  const pdfRef = useRef(null);
-  const readyRef = useRef(false);
-  const lastOpenKeyRef = useRef(null);
-  const lastOpenPageRef = useRef(null);
-  const openPageRef = useRef(openPage);
-  const openKeyRef = useRef(openKey);
-  const onLoadCompleteRef = useRef(onLoadComplete);
-  const frozenPageRef = useRef(NATIVE_OPEN_PAGE);
-
-  openPageRef.current = openPage;
-  openKeyRef.current = openKey;
-  onLoadCompleteRef.current = onLoadComplete;
-
-  useEffect(() => () => {
-    _lastNativePdfReleaseAt = Date.now();
-    if (!readyRef.current) _lastPdfSessionCompleted = false;
-  }, []);
-
-  const jumpToOpenPage = useCallback((page) => {
-    try {
-      pdfRef.current?.setPage?.(clampPage(page, 0));
-    } catch (err) {
-      console.warn('[BookPdf] setPage failed:', err);
-    }
-  }, []);
-
-  // Lesson change after the document is already loaded → one jump, then free scroll
-  useEffect(() => {
-    if (!readyRef.current) return;
-    if (lastOpenKeyRef.current === openKey && lastOpenPageRef.current === openPage) {
-      return;
-    }
-    lastOpenKeyRef.current = openKey;
-    lastOpenPageRef.current = openPage;
-    jumpToOpenPage(openPage);
-  }, [openKey, openPage, jumpToOpenPage]);
-
-  const handleLoadComplete = useCallback((numberOfPages, ...rest) => {
-    readyRef.current = true;
-    _lastPdfSessionCompleted = true;
-    lastOpenKeyRef.current = openKeyRef.current;
-    lastOpenPageRef.current = openPageRef.current;
-    onLoadCompleteRef.current?.(numberOfPages, ...rest);
-    const target = clampPage(openPageRef.current, 0);
-    if (target !== NATIVE_OPEN_PAGE) {
-      requestAnimationFrame(() => jumpToOpenPage(target));
-    }
-  }, [jumpToOpenPage]);
-
-  if (!Pdf || !source) return null;
-
-  return (
-    <Pdf
-      ref={pdfRef}
-      source={source}
-      style={styles.pdf}
-      page={frozenPageRef.current}
-      onLoadComplete={handleLoadComplete}
-      onPageChanged={onPageChanged}
-      onError={onError}
-      renderActivityIndicator={() => null}
-      horizontal={false}
-      enablePaging={false}
-      enableAnnotationRendering={false}
-      enableDoubleTapZoom
-      trustAllCerts={false}
-      fitPolicy={0}
-      minScale={1}
-      maxScale={4}
-      spacing={6}
-      showsVerticalScrollIndicator={false}
-      showsHorizontalScrollIndicator={false}
-    />
-  );
-});
 
 // Live ticks stay inside PlayerBar — PDF / shell do not re-render on time updates
 const PlayerBar = memo(function PlayerBar({ audio }) {
@@ -884,11 +674,6 @@ const styles = StyleSheet.create({
   },
   pdfArea: {
     flex: 1,
-    backgroundColor: '#EDEDE9',
-  },
-  pdf: {
-    flex: 1,
-    width: '100%',
     backgroundColor: '#EDEDE9',
   },
   loadingOverlay: {
