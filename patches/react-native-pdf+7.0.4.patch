@@ -1,0 +1,112 @@
+diff --git a/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfManager.java b/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfManager.java
+index 03e6de2..d96e694 100644
+--- a/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfManager.java
++++ b/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfManager.java
+@@ -29,7 +29,6 @@ import com.facebook.react.viewmanagers.RNPDFPdfViewManagerInterface;
+ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfViewManagerInterface<PdfView> {
+     public static final String REACT_CLASS = "RNPDFPdfView";
+     private Context context;
+-    private PdfView pdfView;
+     private final ViewManagerDelegate<PdfView> mDelegate;
+ 
+     @Nullable
+@@ -54,13 +53,22 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
+ 
+     @Override
+     public PdfView createViewInstance(ThemedReactContext context) {
+-        this.pdfView = new PdfView(context,null);
+-        return pdfView;
++        return new PdfView(context,null);
+     }
+ 
+     @Override
+     public void onDropViewInstance(PdfView pdfView) {
+-        pdfView = null;
++        // 7.0.4 only nulls the parameter and never closes Pdfium. The next
++        // <Pdf> mount then races DecodingAsyncTask / closeDocument and hangs
++        // with neither onLoadComplete nor onError.
++        if (pdfView != null) {
++            try {
++                pdfView.recycle();
++            } catch (Exception e) {
++                android.util.Log.w("PdfManager", "recycle on drop failed", e);
++            }
++        }
++        super.onDropViewInstance(pdfView);
+     }
+ 
+     @ReactProp(name = "path")
+@@ -106,12 +114,12 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
+ 
+     @ReactProp(name = "enableRTL")
+     public void setEnableRTL(PdfView view, boolean enableRTL) {
+-        pdfView.setEnableRTL(enableRTL);
++        view.setEnableRTL(enableRTL);
+     }
+ 
+     @ReactProp(name = "scrollEnabled")
+     public void setScrollEnabled(PdfView view, boolean scrollEnabled) {
+-        pdfView.setScrollEnabled(scrollEnabled);
++        view.setScrollEnabled(scrollEnabled);
+     }
+ 
+     @ReactProp(name = "spacing")
+@@ -158,7 +166,7 @@ public class PdfManager extends SimpleViewManager<PdfView> implements RNPDFPdfVi
+     // use `receiveCommand` method and call this one there
+     @Override
+     public void setNativePage(PdfView view, int page) {
+-        pdfView.setPage(page);
++        view.setPage(page);
+     }
+ 
+     @Override
+diff --git a/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfView.java b/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfView.java
+index e9a1d16..74f3dd1 100644
+--- a/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfView.java
++++ b/node_modules/react-native-pdf/android/src/main/java/org/wonday/pdf/PdfView.java
+@@ -89,6 +89,9 @@ public class PdfView extends PDFView implements OnPageChangeListener,OnLoadCompl
+     private float originalWidth = 0;
+     private float lastPageWidth = 0;
+     private float lastPageHeight = 0;
++    // Path last handed to configurator.load(). Used to skip the reload that
++    // PdfManager.onAfterUpdateTransaction triggers on every prop update.
++    private String loadedPath = null;
+ 
+     // used to store the parameters for `super.onSizeChanged`
+     private int oldW = 0;
+@@ -181,8 +184,15 @@ public class PdfView extends PDFView implements OnPageChangeListener,OnLoadCompl
+ 
+     }
+ 
++    @Override
++    public void recycle() {
++        loadedPath = null;
++        super.recycle();
++    }
++
+     @Override
+     public void onError(Throwable t){
++        loadedPath = null;
+         WritableMap event = Arguments.createMap();
+         if (t.getMessage().contains("Password required or incorrect password")) {
+             event.putString("message", "error|Password required or incorrect password.");
+@@ -303,6 +313,11 @@ public class PdfView extends PDFView implements OnPageChangeListener,OnLoadCompl
+         showLog(format("drawPdf path:%s %s", this.path, this.page));
+ 
+         if (this.path != null){
++            // RN calls this after every transaction. Reloading a live 13MB
++            // document races Pdfium and is what freezes "Opening the book…".
++            if (!this.isRecycled() && this.path.equals(this.loadedPath)) {
++                return;
++            }
+ 
+             // set scale
+             this.setMinZoom(this.minScale);
+@@ -371,6 +386,7 @@ public class PdfView extends PDFView implements OnPageChangeListener,OnLoadCompl
+             }
+ 
+             configurator.load();
++            this.loadedPath = this.path;
+         }
+     }
+ 

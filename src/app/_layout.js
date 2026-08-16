@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, DB_STATUS, useAppContext } from '@/context/AppContext';
 import { AudioProvider } from '@/context/AudioContext';
+import { PdfSessionProvider } from '@/context/PdfSessionContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -41,11 +42,16 @@ function AppShell() {
 
   return (
     <AudioProvider>
-      <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="index" options={{ animation: 'none' }} />
-        <Stack.Screen name="list" options={{ animation: 'fade' }} />
-        <Stack.Screen name="reader" options={{ animation: 'slide_from_bottom' }} />
-      </Stack>
+      <PdfSessionProvider>
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          <Stack.Screen name="index" options={{ animation: 'none' }} />
+          <Stack.Screen name="list" options={{ animation: 'fade' }} />
+          {/* Fade keeps the persistent Pdf host aligned with the slot.
+              slide_from_bottom left the native view at the final frame
+              while the chrome was still animating. */}
+          <Stack.Screen name="reader" options={{ animation: 'fade' }} />
+        </Stack>
+      </PdfSessionProvider>
     </AudioProvider>
   );
 }
