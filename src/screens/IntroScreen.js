@@ -7,7 +7,7 @@ import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { preparePdfAsset } from '@/services/pdfAsset';
 
-const INTRO_DURATION_MS = 3000;
+const INTRO_DURATION_MS = 4000;
 
 export default function IntroScreen() {
   const router = useRouter();
@@ -42,6 +42,9 @@ export default function IntroScreen() {
         <Text style={styles.subtitle}>Gardens of the Righteous</Text>
         <Text style={styles.author}>
           Imam Yahya ibn Sharaf al-Nawawi
+        </Text>
+         <Text style={styles.teacher}>
+          በሸይኽ ሙሀመድ አሚን ኢድሪስ 
         </Text>
       </View>
     </View>
@@ -139,7 +142,7 @@ const styles = StyleSheet.create({
     color: colors.heroSubtext,
     textAlign: 'center',
     letterSpacing: 0.5,
-    marginBottom: spacing.xl + spacing.sm,
+    marginBottom: spacing.sm,
   },
   author: {
     fontSize: 13,
@@ -147,5 +150,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     letterSpacing: 0.3,
+  },
+
+  teacher: {
+    fontSize: 16,
+    color: colors.heroMuted,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    letterSpacing: 0.3,
+    marginTop: spacing.xl + spacing.sm,
   },
 });
