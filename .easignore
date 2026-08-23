@@ -1,21 +1,52 @@
+# Copied from .gitignore — EAS uses .easignore instead of .gitignore when present.
+
+# dependencies
 node_modules/
-.git
+
+# Expo
 .expo/
-.claude/
-.vscode/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files (R2 secrets must never ship)
+.env
+.env*.local
+
+# EAS archive inspect output
 eas-archive-inspect/
 
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# typescript
+*.tsbuildinfo
 
-README.md
-*.md
+example
 
-android/.gradle/
-android/build/
-android/app/build/
+# generated native folders
+/ios
+/android
 
-__tests__/
-tests/
+# Audio files are served from Cloudflare R2, not the app bundle.
+# Keep the PDF and images in assets/.
+/assets/audio
+/assets/audio/

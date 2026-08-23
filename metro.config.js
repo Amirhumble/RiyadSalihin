@@ -14,4 +14,14 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+// Audio lives in Cloudflare R2 + on-device cache, never in the JS bundle.
+const audioBlock = /[\\/]assets[\\/]audio[\\/].*\.mp3$/i;
+const previousBlockList = config.resolver.blockList;
+const previousList = !previousBlockList
+  ? []
+  : Array.isArray(previousBlockList)
+    ? previousBlockList
+    : [previousBlockList];
+config.resolver.blockList = [...previousList, audioBlock];
+
 module.exports = config;

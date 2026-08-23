@@ -31,7 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# EAS archive inspect output
+eas-archive-inspect/
 
 # typescript
 *.tsbuildinfo

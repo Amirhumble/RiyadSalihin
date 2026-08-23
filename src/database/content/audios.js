@@ -1,7 +1,7 @@
 // Lesson list. Add a new lesson by appending an object like the ones below.
-// Also add the matching require() in services/audioAssets.js.
+// Upload the matching MP3 to the R2 bucket (object key = audio/{filename}).
 //
-// filename           — must match a file in assets/audio/
+// filename           — must match the R2 object, e.g. audio/001.mp3
 // title              — shown in the list and reader header
 // hadith_number_from — first global hadith (0 = introduction)
 // hadith_number_to   — last global hadith (0 = introduction)

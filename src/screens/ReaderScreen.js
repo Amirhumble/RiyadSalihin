@@ -44,6 +44,20 @@ function fmt(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function audioErrorMessage(err) {
+  if (!err) return 'Audio is currently unavailable.';
+  if (err.code === 'DOWNLOAD_REQUIRED') {
+    return 'This lesson needs to be downloaded first. Connect to the internet and try again.';
+  }
+  if (err.code === 'NOT_CONFIGURED') {
+    return 'Audio storage is not configured.';
+  }
+  if (err.code === 'DOWNLOAD_FAILED' || err.code === 'INVALID_FILENAME') {
+    return err.message || 'Could not download this lesson. Please try again.';
+  }
+  return err.message || 'Audio is currently unavailable.';
+}
+
 export default function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -215,15 +229,17 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
     currentAudio, audioError, clearAudioError,
     isPlaying, isBuffering, audioLoading,
     currentTime, duration, didJustFinish,
-    playbackRate,
+    playbackRate, downloadProgress,
     loadAudio, play, pause, seek, setSpeed,
   } = useAudioPlayer();
 
   const isThis = currentAudio?.id === audio?.id;
   const playing = isThis && isPlaying && !didJustFinish;
+  const isDownloading = isThis && audioLoading && downloadProgress != null;
   const buffering = isThis && (isBuffering || audioLoading);
   const time = isThis ? currentTime : 0;
   const dur = isThis && duration > 0 ? duration : 0;
+  const downloadPct = Math.round(Math.min(Math.max(downloadProgress ?? 0, 0), 1) * 100);
 
   const trackRef = useRef(null);
   const trackMetrics = useRef({ pageX: 0, width: 0 });
@@ -373,13 +389,19 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const handlePlayPause = useCallback(() => {
     clearAudioError();
-    if (!isThis) {
+    if (!isThis || audioError) {
       loadAudio(audio, audio.position_ms ?? 0);
       return;
     }
+    if (isDownloading) return;
     if (playing) pause();
     else play();
-  }, [isThis, playing, audio, loadAudio, play, pause, clearAudioError]);
+  }, [isThis, playing, audio, audioError, isDownloading, loadAudio, play, pause, clearAudioError]);
+
+  const handleRetryDownload = useCallback(() => {
+    clearAudioError();
+    loadAudio(audio, audio.position_ms ?? 0);
+  }, [audio, loadAudio, clearAudioError]);
 
   const skip = useCallback((delta) => {
     if (!isThis || dur <= 0) return;
@@ -441,10 +463,30 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
         </TouchableOpacity>
       </View>
 
+      {isThis && isDownloading ? (
+        <View style={pl.downloadRow}>
+          <Text style={pl.downloadText}>Downloading {downloadPct}%</Text>
+          <View style={pl.downloadTrack}>
+            <View style={[pl.downloadFill, { width: `${downloadPct}%` }]} />
+          </View>
+        </View>
+      ) : null}
+
       {isThis && audioError ? (
-        <Text style={pl.errorText} numberOfLines={1}>
-          Audio is currently unavailable.
-        </Text>
+        <View style={pl.errorRow}>
+          <Text style={pl.errorText}>
+            {audioErrorMessage(audioError)}
+          </Text>
+          <TouchableOpacity
+            onPress={handleRetryDownload}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Try downloading again"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={pl.retryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
 
       <View style={pl.timeRow}>
@@ -773,11 +815,43 @@ const pl = StyleSheet.create({
     color: colors.heroSubtext,
     marginTop: 2,
   },
+  downloadRow: {
+    marginBottom: spacing.sm,
+  },
+  downloadText: {
+    fontSize: 12,
+    color: colors.gold,
+    textAlign: 'center',
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  downloadTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    overflow: 'hidden',
+  },
+  downloadFill: {
+    height: '100%',
+    backgroundColor: colors.gold,
+    borderRadius: 2,
+  },
+  errorRow: {
+    marginBottom: spacing.sm,
+    alignItems: 'center',
+    gap: 6,
+  },
   errorText: {
     fontSize: 12,
     color: colors.gold,
     textAlign: 'center',
-    marginBottom: spacing.sm,
+    lineHeight: 18,
+  },
+  retryText: {
+    fontSize: 13,
+    color: colors.heroText,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   timeRow: {
     flexDirection: 'row',

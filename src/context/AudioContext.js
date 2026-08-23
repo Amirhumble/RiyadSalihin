@@ -19,7 +19,7 @@ import {
 } from 'react';
 
 import { saveDuration, savePlaybackPosition } from '@/database/repositories/audioRepository';
-import { resolveAudioSource } from '@/services/audioAssets';
+import { getLocalAudioUri } from '@/services/audioCache';
 import {
   configureAudioSession,
   getPlayer,
@@ -42,6 +42,7 @@ export function AudioProvider({ children }) {
   const [currentAudio, setCurrentAudio] = useState(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(null);
   const [playbackRate, setPlaybackRate] = useState(DEFAULT_SPEED);
 
   const playerRef = useRef(getPlayer());
@@ -49,6 +50,7 @@ export function AudioProvider({ children }) {
   const durationSavedFor = useRef(null);
   const currentAudioRef = useRef(null);
   const actionLock = useRef(false);
+  const loadGen = useRef(0);
 
   const status = useAudioPlayerStatus(playerRef.current);
 
@@ -116,26 +118,32 @@ export function AudioProvider({ children }) {
       setAudioError(new Error('No filename on audio record.'));
       return;
     }
-    const source = resolveAudioSource(audioRecord.filename);
-    if (!source) {
-      setAudioError(new Error(`Audio "${audioRecord.filename}" not available.`));
-      return;
-    }
 
+    const gen = ++loadGen.current;
     setAudioLoading(true);
     setAudioError(null);
+    setDownloadProgress(null);
     setCurrentAudio(audioRecord);
     durationSavedFor.current = null;
     lastPersist.current = 0;
 
     try {
-      loadSource(source);
+      const uri = await getLocalAudioUri(audioRecord.filename, {
+        onProgress: (progress) => {
+          if (gen !== loadGen.current) return;
+          setDownloadProgress(progress);
+        },
+      });
+      if (gen !== loadGen.current) return;
+
+      loadSource({ uri });
       try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
 
       const resumeAt = Math.max(0, (startPositionMs || 0) / 1_000);
       if (resumeAt > 0) {
         // Brief delay so the new source is ready before seeking
         setTimeout(() => {
+          if (gen !== loadGen.current) return;
           svcSeekTo(resumeAt).catch(() => {});
           try { svcPlay(); } catch (_) { /* ignore */ }
         }, 250);
@@ -143,10 +151,14 @@ export function AudioProvider({ children }) {
         svcPlay();
       }
     } catch (err) {
+      if (gen !== loadGen.current) return;
       console.error('[AudioContext] loadAudio failed:', err);
       setAudioError(err);
     } finally {
-      setAudioLoading(false);
+      if (gen === loadGen.current) {
+        setAudioLoading(false);
+        setDownloadProgress(null);
+      }
     }
   }, [playbackRate]);
 
@@ -270,12 +282,14 @@ export function AudioProvider({ children }) {
     didJustFinish: status.didJustFinish ?? false,
     currentTime: status.currentTime ?? 0,
     duration: status.duration ?? 0,
+    downloadProgress,
   }), [
     isPlaying,
     status.isBuffering,
     status.didJustFinish,
     status.currentTime,
     status.duration,
+    downloadProgress,
   ]);
 
   return (
