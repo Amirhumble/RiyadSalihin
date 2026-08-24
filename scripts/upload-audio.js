@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
 const crypto = require('crypto');
+const dns = require('dns');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
+
+dns.setDefaultResultOrder('ipv4first');
 
 const ROOT = path.resolve(__dirname, '..');
 const AUDIO_DIR = path.join(ROOT, 'assets', 'audio');
@@ -35,7 +39,15 @@ function loadEnvFile(filePath) {
 loadEnvFile(path.join(ROOT, '.env'));
 loadEnvFile(path.join(ROOT, '.env.local'));
 
-const ACCOUNT_ID = (process.env.R2_ACCOUNT_ID || '').trim();
+function normalizeAccountId(value) {
+  let id = String(value || '').trim();
+  id = id.replace(/^https?:\/\//i, '');
+  id = id.replace(/\.r2\.cloudflarestorage\.com.*$/i, '');
+  id = id.replace(/\/+$/, '');
+  return id;
+}
+
+const ACCOUNT_ID = normalizeAccountId(process.env.R2_ACCOUNT_ID);
 const ACCESS_KEY = (process.env.R2_ACCESS_KEY_ID || '').trim();
 const SECRET_KEY = (process.env.R2_SECRET_ACCESS_KEY || '').trim();
 const BUCKET = (process.env.R2_BUCKET_NAME || 'audio').trim();
@@ -46,15 +58,12 @@ function fail(message) {
   process.exit(1);
 }
 
-if (typeof fetch !== 'function') {
-  fail('Node 18+ is required (global fetch).');
-}
 if (!ACCOUNT_ID) fail('Missing R2_ACCOUNT_ID.');
 if (!ACCESS_KEY) fail('Missing R2_ACCESS_KEY_ID. Never put this in src/.');
 if (!SECRET_KEY) fail('Missing R2_SECRET_ACCESS_KEY. Never put this in src/.');
 if (!BUCKET) fail('Missing R2_BUCKET_NAME.');
 
-const HOST = `${ACCOUNT_ID}.r2.cloudflarestorage.com`;
+const API_HOST = `${BUCKET}.${ACCOUNT_ID}.r2.cloudflarestorage.com`;
 
 function hmac(key, data) {
   return crypto.createHmac('sha256', key).update(data, 'utf8').digest();
@@ -71,13 +80,9 @@ function rfc3986(value) {
 }
 
 function canonicalUri(objectKey) {
-  const parts = [BUCKET];
-  if (objectKey) {
-    for (const segment of objectKey.split('/')) {
-      if (segment) parts.push(segment);
-    }
-  }
-  return `/${parts.map(rfc3986).join('/')}`;
+  if (!objectKey) return '/';
+  const parts = objectKey.split('/').filter(Boolean).map(rfc3986);
+  return `/${parts.join('/')}`;
 }
 
 function canonicalQuery(query) {
@@ -88,14 +93,36 @@ function canonicalQuery(query) {
     .join('&');
 }
 
-async function signedFetch({ method, objectKey, query, body, extraHeaders }) {
+function formatNetworkError(err) {
+  const lines = [err.message || String(err)];
+  let current = err.cause;
+  let depth = 0;
+  while (current && depth < 4) {
+    const bits = [
+      current.message,
+      current.code,
+      current.syscall,
+      current.address,
+      current.port,
+    ].filter((part) => part != null && part !== '');
+    if (bits.length) lines.push(`cause: ${bits.join(' ')}`);
+    current = current.cause;
+    depth += 1;
+  }
+  if (err.code && !lines.join(' ').includes(String(err.code))) {
+    lines.push(`code: ${err.code}`);
+  }
+  return lines.join('\n');
+}
+
+function signedHeadersAndUrl({ method, objectKey, query, body, extraHeaders }) {
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
   const payloadHash = body ? sha256Hex(body) : sha256Hex('');
 
   const headers = {
-    host: HOST,
+    host: API_HOST,
     'x-amz-content-sha256': payloadHash,
     'x-amz-date': amzDate,
     ...(extraHeaders || {}),
@@ -113,10 +140,11 @@ async function signedFetch({ method, objectKey, query, body, extraHeaders }) {
     .join('');
   const signedHeaders = signedHeaderNames.join(';');
   const queryString = canonicalQuery(query);
+  const uri = canonicalUri(objectKey);
 
   const canonicalRequest = [
     method,
-    canonicalUri(objectKey),
+    uri,
     queryString,
     canonicalHeaders,
     signedHeaders,
@@ -141,18 +169,65 @@ async function signedFetch({ method, objectKey, query, body, extraHeaders }) {
     `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
-  const url = `https://${HOST}${canonicalUri(objectKey)}${queryString ? `?${queryString}` : ''}`;
-  const res = await fetch(url, {
-    method,
+  return {
+    url: `https://${API_HOST}${uri}${queryString ? `?${queryString}` : ''}`,
     headers: {
       ...headers,
       Authorization: authorization,
     },
-    body: body || undefined,
-  });
+  };
+}
 
-  const text = await res.text();
-  return { ok: res.ok, status: res.status, text, headers: res.headers };
+function requestOnce({ method, url, headers, body }) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          const status = res.statusCode || 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            text,
+          });
+        });
+      }
+    );
+    req.setTimeout(30000, () => {
+      req.destroy(new Error(`Request timed out after 30s: ${method} ${url}`));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function signedRequest({ method, objectKey, query, body, extraHeaders }) {
+  const { url, headers } = signedHeadersAndUrl({
+    method,
+    objectKey,
+    query,
+    body,
+    extraHeaders,
+  });
+  try {
+    return await requestOnce({ method, url, headers, body });
+  } catch (err) {
+    const wrapped = new Error(`${method} ${url}\n${formatNetworkError(err)}`);
+    wrapped.cause = err;
+    throw wrapped;
+  }
 }
 
 async function listRemoteObjects() {
@@ -166,9 +241,14 @@ async function listRemoteObjects() {
     };
     if (token) query['continuation-token'] = token;
 
-    const res = await signedFetch({ method: 'GET', query });
+    let res;
+    try {
+      res = await signedRequest({ method: 'GET', query });
+    } catch (err) {
+      fail(`Could not list R2 objects (network).\n${err.message}`);
+    }
     if (!res.ok) {
-      fail(`Could not list R2 objects: ${res.status} ${res.text}`);
+      fail(`Could not list R2 objects: HTTP ${res.status}\n${res.text || '(empty body)'}`);
     }
 
     const blocks = [...res.text.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)];
@@ -192,11 +272,12 @@ async function listRemoteObjects() {
 
 async function uploadObject(objectKey, localPath) {
   const body = fs.readFileSync(localPath);
-  return signedFetch({
+  return signedRequest({
     method: 'PUT',
     objectKey,
     body,
     extraHeaders: {
+      'content-length': String(body.length),
       'content-type': 'audio/mpeg',
       'cache-control': 'public, max-age=31536000, immutable',
     },
@@ -226,10 +307,11 @@ async function main() {
 
   const publicHint = PUBLIC_BASE
     ? `${PUBLIC_BASE}/${OBJECT_PREFIX}`
-    : `r2://${BUCKET}/${OBJECT_PREFIX}`;
+    : `https://${API_HOST}/${OBJECT_PREFIX}`;
 
   console.log(`[upload-audio] Found ${files.length} local MP3 file(s) in assets/audio/`);
   console.log(`[upload-audio] Bucket: ${BUCKET}`);
+  console.log(`[upload-audio] S3 API host: ${API_HOST}`);
   console.log(`[upload-audio] Objects: ${OBJECT_PREFIX}001.mp3 …`);
   console.log(`[upload-audio] Public base: ${publicHint}`);
   console.log('[upload-audio] Local files are NOT deleted.\n');
@@ -260,15 +342,18 @@ async function main() {
     try {
       const res = await uploadObject(objectKey, localPath);
       if (!res.ok) {
-        console.log(`FAIL (${res.status})`);
-        failures.push({ name: objectKey, reason: `${res.status} ${res.text}` });
+        console.log(`FAIL (HTTP ${res.status})`);
+        failures.push({
+          name: objectKey,
+          reason: `HTTP ${res.status}\n${res.text || '(empty body)'}`,
+        });
         continue;
       }
       console.log('ok');
       uploaded += 1;
     } catch (err) {
       console.log('FAIL');
-      failures.push({ name: objectKey, reason: err.message || String(err) });
+      failures.push({ name: objectKey, reason: formatNetworkError(err) });
     }
   }
 
@@ -287,5 +372,5 @@ async function main() {
 }
 
 main().catch((err) => {
-  fail(err.message || String(err));
+  fail(formatNetworkError(err));
 });
