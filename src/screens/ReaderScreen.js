@@ -62,7 +62,8 @@ export default function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { audioId, pdfPage: pdfPageParam } = useLocalSearchParams();
-  const id = Number(audioId);
+  const rawAudioId = Array.isArray(audioId) ? audioId[0] : audioId;
+  const id = Number(rawAudioId);
   const rawPageParam = Array.isArray(pdfPageParam) ? pdfPageParam[0] : pdfPageParam;
   const paramPage = rawPageParam != null && rawPageParam !== ''
     ? clampPage(rawPageParam, 0)
@@ -192,18 +193,12 @@ export default function ReaderScreen() {
           <PdfErrorView error={pdfError} onRetry={retry} />
         ) : null}
 
-        <Modal
-          visible={showPdfLoading}
-          transparent
-          animationType="none"
-          statusBarTranslucent
-          onRequestClose={() => {}}
-        >
+        {showPdfLoading ? (
           <View style={styles.loadingOverlay} pointerEvents="none">
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingTitle}>Opening the book…</Text>
           </View>
-        </Modal>
+        ) : null}
       </View>
 
       <View style={[styles.playerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -717,13 +712,15 @@ const styles = StyleSheet.create({
   pdfArea: {
     flex: 1,
     backgroundColor: '#EDEDE9',
+    position: 'relative',
   },
   loadingOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#EDEDE9',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
+    zIndex: 1,
   },
   loadingTitle: {
     fontSize: 15,

@@ -61,7 +61,13 @@ export default function AudioListScreen() {
     (audio) => {
       const page = Number(audio?.pdf_page);
       const pdfPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
-      router.push(`/reader?audioId=${audio.id}&pdfPage=${pdfPage}`);
+      router.push({
+        pathname: '/reader',
+        params: {
+          audioId: String(audio.id),
+          pdfPage: String(pdfPage),
+        },
+      });
     },
     [router]
   );

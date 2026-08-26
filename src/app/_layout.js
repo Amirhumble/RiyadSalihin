@@ -49,7 +49,13 @@ function AppShell() {
           {/* Fade keeps the persistent Pdf host aligned with the slot.
               slide_from_bottom left the native view at the final frame
               while the chrome was still animating. */}
-          <Stack.Screen name="reader" options={{ animation: 'fade' }} />
+          <Stack.Screen
+            name="reader"
+            options={{
+              animation: 'fade',
+              contentStyle: { backgroundColor: '#F4F4F4' },
+            }}
+          />
         </Stack>
       </PdfSessionProvider>
     </AudioProvider>
