@@ -17,6 +17,7 @@ const MIGRATIONS = [
 ];
 
 let _db = null;
+let _initPromise = null;
 
 export function getDatabase() {
   if (!_db) {
@@ -30,15 +31,31 @@ export function getDatabase() {
 // Open DB → migrations → sync lesson list from content/audios.js
 export async function initDatabase() {
   if (_db) return;
+  if (!_initPromise) {
+    _initPromise = openAndPrepareDatabase().catch((err) => {
+      _initPromise = null;
+      throw err;
+    });
+  }
+  await _initPromise;
+}
 
-  _db = await SQLite.openDatabaseAsync(DB_NAME);
-  await _db.execAsync('PRAGMA journal_mode = WAL;');
-  await _db.execAsync('PRAGMA foreign_keys = ON;');
-
-  await runMigrations(_db);
-
-  // Upserts lesson metadata; never overwrites position_ms (user progress)
-  await syncAudioContent(_db);
+async function openAndPrepareDatabase() {
+  const db = await SQLite.openDatabaseAsync(DB_NAME);
+  try {
+    await db.execAsync('PRAGMA journal_mode = WAL;');
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+    await runMigrations(db);
+    await syncAudioContent(db);
+    _db = db;
+  } catch (err) {
+    try {
+      await db.closeAsync();
+    } catch {
+      // ignore close errors after a failed init
+    }
+    throw err;
+  }
 }
 
 async function runMigrations(db) {

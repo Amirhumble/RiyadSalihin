@@ -87,16 +87,16 @@ export async function syncAudioContent(db) {
   let audiosInserted = 0;
   let audiosUpdated = 0;
 
-  await db.withTransactionAsync(async () => {
+  await db.withExclusiveTransactionAsync(async (txn) => {
     for (const a of audios) {
       const fname = a.filename.trim();
-      const existing = await db.getFirstAsync(
+      const existing = await txn.getFirstAsync(
         'SELECT id FROM audios WHERE filename = ?;',
         [fname]
       );
 
       if (existing) {
-        await db.runAsync(
+        await txn.runAsync(
           `UPDATE audios
               SET title = ?,
                   hadith_number_from = ?,
@@ -116,7 +116,7 @@ export async function syncAudioContent(db) {
         audiosUpdated += 1;
         if (__DEV__) console.log(`[Content] Updated:  "${fname}"`);
       } else {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO audios
              (title, filename, hadith_number_from, hadith_number_to, ordering, pdf_page)
            VALUES (?, ?, ?, ?, ?, ?);`,
