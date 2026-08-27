@@ -126,6 +126,15 @@ export function PdfSessionProvider({ children }) {
 
   const present = useCallback(({ openPage: nextPage, openKey: nextKey }) => {
     const page = clampPage(nextPage, 0);
+    if (__DEV__) {
+      console.log('[PdfPage] session present', {
+        requested: nextPage,
+        clamped: page,
+        openKey: nextKey,
+        pdfReady: pdfReadyRef.current,
+        currentPage: currentPageRef.current,
+      });
+    }
     openPageRef.current = page;
     setVisible(true);
     setOpenPage(page);
@@ -165,6 +174,12 @@ export function PdfSessionProvider({ children }) {
     const total = typeof numberOfPages === 'number'
       ? numberOfPages
       : (numberOfPages?.numberOfPages ?? 0);
+    if (__DEV__) {
+      console.log('[PdfPage] onLoadComplete', {
+        totalPages: total,
+        openPage: openPageRef.current,
+      });
+    }
     setTotalPages(total);
     setPdfReady(true);
     pdfReadyRef.current = true;
@@ -174,6 +189,12 @@ export function PdfSessionProvider({ children }) {
   const handlePageChanged = useCallback((page) => {
     const p = typeof page === 'number' ? page : page?.page ?? page;
     if (typeof p !== 'number' || p < 1) return;
+    if (__DEV__) {
+      console.log('[PdfPage] onPageChanged', {
+        actual: p,
+        openPage: openPageRef.current,
+      });
+    }
     currentPageRef.current = p;
     setCurrentPage((prev) => (prev === p ? prev : p));
     if (p === openPageRef.current) setPageReady(true);
@@ -329,24 +350,32 @@ const BookPdf = memo(function BookPdf({
 }) {
   const pdfRef = useRef(null);
   const readyRef = useRef(false);
+  const [docReady, setDocReady] = useState(false);
   const openPageRef = useRef(openPage);
-  const openKeyRef = useRef(openKey);
   const onLoadCompleteRef = useRef(onLoadComplete);
-  const frozenPageRef = useRef(NATIVE_OPEN_PAGE);
+  const jumpTimerRef = useRef(null);
 
   openPageRef.current = openPage;
-  openKeyRef.current = openKey;
   onLoadCompleteRef.current = onLoadComplete;
 
+  const targetPage = clampPage(openPage, 0);
+  // First native load must stay on page 1 (high defaultPage hangs Pdfium).
+  // After onLoadComplete, pass the lesson page so Paper does not keep
+  // committing page=1 and jumping back to the start.
+  const nativePage = docReady ? targetPage : NATIVE_OPEN_PAGE;
+
   const jumpToOpenPage = useCallback((page) => {
+    const target = clampPage(page, 0);
+    if (__DEV__) {
+      console.log('[PdfPage] setPage', { target, docReady: readyRef.current });
+    }
     try {
-      pdfRef.current?.setPage?.(clampPage(page, 0));
+      pdfRef.current?.setPage?.(target);
     } catch (err) {
       console.warn('[BookPdf] setPage failed:', err);
     }
   }, []);
 
-  // New lesson (or same lesson re-opened) after the document is already loaded.
   useEffect(() => {
     if (!readyRef.current) return;
     jumpToOpenPage(openPage);
@@ -354,21 +383,29 @@ const BookPdf = memo(function BookPdf({
 
   const handleLoadComplete = useCallback((numberOfPages, ...rest) => {
     readyRef.current = true;
+    setDocReady(true);
     onLoadCompleteRef.current?.(numberOfPages, ...rest);
     const target = clampPage(openPageRef.current, 0);
-    if (target !== NATIVE_OPEN_PAGE) {
-      requestAnimationFrame(() => jumpToOpenPage(target));
-    }
+    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+    jumpTimerRef.current = setTimeout(() => jumpToOpenPage(target), 50);
   }, [jumpToOpenPage]);
 
+  useEffect(() => () => {
+    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+  }, []);
+
   if (!Pdf || !source) return null;
+
+  if (__DEV__) {
+    console.log('[PdfPage] native page prop', { nativePage, targetPage, docReady });
+  }
 
   return (
     <Pdf
       ref={pdfRef}
       source={source}
       style={styles.pdf}
-      page={frozenPageRef.current}
+      page={nativePage}
       onLoadComplete={handleLoadComplete}
       onPageChanged={onPageChanged}
       onError={onError}

@@ -134,9 +134,18 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     if (!focused || !hasTargetPage) return;
+    if (__DEV__) {
+      console.log('[PdfPage] reader present', {
+        id: audio?.id ?? id,
+        filename: audio?.filename,
+        pdf_page: audio?.pdf_page,
+        paramPage,
+        openPage,
+      });
+    }
     present({ openPage, openKey: audio?.id ?? id ?? 0 });
     publishSlot();
-  }, [focused, hasTargetPage, openPage, audio?.id, id, present, publishSlot]);
+  }, [focused, hasTargetPage, openPage, audio?.id, audio?.filename, audio?.pdf_page, paramPage, id, present, publishSlot]);
 
   // PDF loading only — audio has its own indicator in the player bar
   const showPdfLoading = !pdfError && (pdfResolving || !pdfReady || !pageReady);
