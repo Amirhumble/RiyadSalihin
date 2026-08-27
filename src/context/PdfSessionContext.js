@@ -350,24 +350,24 @@ const BookPdf = memo(function BookPdf({
 }) {
   const pdfRef = useRef(null);
   const readyRef = useRef(false);
+  const positionedRef = useRef(false);
   const [docReady, setDocReady] = useState(false);
   const openPageRef = useRef(openPage);
   const onLoadCompleteRef = useRef(onLoadComplete);
-  const jumpTimerRef = useRef(null);
+  const onPageChangedRef = useRef(onPageChanged);
 
   openPageRef.current = openPage;
   onLoadCompleteRef.current = onLoadComplete;
+  onPageChangedRef.current = onPageChanged;
 
   const targetPage = clampPage(openPage, 0);
-  // First native load must stay on page 1 (high defaultPage hangs Pdfium).
-  // After onLoadComplete, pass the lesson page so Paper does not keep
-  // committing page=1 and jumping back to the start.
   const nativePage = docReady ? targetPage : NATIVE_OPEN_PAGE;
 
-  const jumpToOpenPage = useCallback((page) => {
-    const target = clampPage(page, 0);
+  const applyLessonPage = useCallback(() => {
+    if (!readyRef.current) return;
+    const target = clampPage(openPageRef.current, 0);
     if (__DEV__) {
-      console.log('[PdfPage] setPage', { target, docReady: readyRef.current });
+      console.log('[PdfPage] applyLessonPage', { target });
     }
     try {
       pdfRef.current?.setPage?.(target);
@@ -376,23 +376,61 @@ const BookPdf = memo(function BookPdf({
     }
   }, []);
 
+  const markDocumentReady = useCallback((numberOfPages) => {
+    const alreadyReady = readyRef.current;
+    if (!alreadyReady) {
+      readyRef.current = true;
+      setDocReady(true);
+      onLoadCompleteRef.current?.(numberOfPages);
+    }
+    applyLessonPage();
+  }, [applyLessonPage]);
+
   useEffect(() => {
+    positionedRef.current = false;
     if (!readyRef.current) return;
-    jumpToOpenPage(openPage);
-  }, [openKey, openPage, presentId, jumpToOpenPage]);
+    applyLessonPage();
+  }, [openKey, openPage, presentId, applyLessonPage]);
 
   const handleLoadComplete = useCallback((numberOfPages, ...rest) => {
-    readyRef.current = true;
-    setDocReady(true);
-    onLoadCompleteRef.current?.(numberOfPages, ...rest);
-    const target = clampPage(openPageRef.current, 0);
-    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
-    jumpTimerRef.current = setTimeout(() => jumpToOpenPage(target), 50);
-  }, [jumpToOpenPage]);
+    if (__DEV__) {
+      console.log('[PdfPage] loadComplete', {
+        numberOfPages,
+        requested: openPageRef.current,
+      });
+    }
+    markDocumentReady(numberOfPages, ...rest);
+  }, [markDocumentReady]);
 
-  useEffect(() => () => {
-    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
-  }, []);
+  const handlePageChanged = useCallback((page, numberOfPages) => {
+    const actual = typeof page === 'number' ? page : page?.page ?? page;
+    if (typeof actual !== 'number' || actual < 1) return;
+
+    const requested = clampPage(openPageRef.current, 0);
+
+    if (!readyRef.current) {
+      if (__DEV__) {
+        console.log('[PdfPage] firstPaint', { actual, requested, numberOfPages });
+      }
+      markDocumentReady(numberOfPages);
+      return;
+    }
+
+    if (!positionedRef.current) {
+      if (actual === requested) {
+        positionedRef.current = true;
+        if (__DEV__) {
+          console.log('[PdfPage] initialPositioned', { actual });
+        }
+        onPageChangedRef.current?.(actual, numberOfPages);
+      } else if (__DEV__) {
+        console.log('[PdfPage] ignoreUntilPositioned', { actual, requested });
+      }
+      return;
+    }
+
+    onPageChangedRef.current?.(actual, numberOfPages);
+  }, [markDocumentReady]);
 
   if (!Pdf || !source) return null;
 
@@ -407,7 +445,7 @@ const BookPdf = memo(function BookPdf({
       style={styles.pdf}
       page={nativePage}
       onLoadComplete={handleLoadComplete}
-      onPageChanged={onPageChanged}
+      onPageChanged={handlePageChanged}
       onError={onError}
       renderActivityIndicator={() => null}
       horizontal={false}
