@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import DownloadAllBar from '@/components/audio/DownloadAllBar';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
 import colors from '@/constants/colors';
@@ -109,6 +110,8 @@ export default function AudioListScreen() {
           </Text>
         </View>
       </SafeAreaView>
+
+      <DownloadAllBar audios={audios} />
 
       <FlatList
         data={audios}

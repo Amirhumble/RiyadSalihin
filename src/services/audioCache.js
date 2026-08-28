@@ -58,7 +58,11 @@ function removeIfExists(file) {
   }
 }
 
-async function downloadToCache(filename, onProgress) {
+function isAbortError(err) {
+  return err?.name === 'AbortError' || err?.code === 'ABORTED';
+}
+
+async function downloadToCache(filename, onProgress, signal) {
   const safe = sanitizeAudioFilename(filename);
   const dir = getCacheDir();
   const finalFile = new File(dir, safe);
@@ -66,6 +70,10 @@ async function downloadToCache(filename, onProgress) {
 
   if (finalFile.exists && finalFile.size > 0) {
     return finalFile.uri;
+  }
+
+  if (signal?.aborted) {
+    throw makeError('ABORTED', 'Download cancelled.');
   }
 
   removeIfExists(tmpFile);
@@ -78,6 +86,7 @@ async function downloadToCache(filename, onProgress) {
   try {
     const task = File.createDownloadTask(url, tmpFile, {
       headers: { Accept: 'audio/mpeg,audio/*,*/*' },
+      signal,
       onProgress: ({ bytesWritten, totalBytes }) => {
         if (!onProgress) return;
         if (!totalBytes || totalBytes < 0) return;
@@ -87,6 +96,9 @@ async function downloadToCache(filename, onProgress) {
     downloaded = await task.downloadAsync();
   } catch (err) {
     removeIfExists(tmpFile);
+    if (isAbortError(err) || signal?.aborted) {
+      throw makeError('ABORTED', 'Download cancelled.', err);
+    }
     if (isLikelyOffline(err)) {
       throw makeError(
         'DOWNLOAD_REQUIRED',
@@ -129,7 +141,7 @@ async function downloadToCache(filename, onProgress) {
   return finalFile.uri;
 }
 
-export async function getLocalAudioUri(filename, { onProgress } = {}) {
+export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
   const safe = sanitizeAudioFilename(filename);
 
   if (isAudioCached(safe)) {
@@ -140,11 +152,29 @@ export async function getLocalAudioUri(filename, { onProgress } = {}) {
     return inflight.get(safe);
   }
 
-  const promise = downloadToCache(safe, onProgress).finally(() => {
+  if (signal?.aborted) {
+    throw makeError('ABORTED', 'Download cancelled.');
+  }
+
+  const promise = downloadToCache(safe, onProgress, signal).finally(() => {
     inflight.delete(safe);
   });
   inflight.set(safe, promise);
   return promise;
+}
+
+export async function probeRemoteAudioBytes(filename) {
+  const url = getRemoteAudioUrl(filename);
+  const res = await fetch(url, { method: 'HEAD' });
+  if (!res.ok) {
+    const err = new Error(`HEAD failed (${res.status})`);
+    err.code = 'HEAD_FAILED';
+    throw err;
+  }
+  const raw = res.headers.get('content-length');
+  const bytes = Number(raw);
+  if (!Number.isFinite(bytes) || bytes <= 0) return null;
+  return bytes;
 }
 
 export function deleteCachedAudio(filename) {
