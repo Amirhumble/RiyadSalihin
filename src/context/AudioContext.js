@@ -19,7 +19,7 @@ import {
 } from 'react';
 
 import { saveDuration, savePlaybackPosition } from '@/database/repositories/audioRepository';
-import { getLocalAudioUri } from '@/services/audioCache';
+import { getCachedAudioUri, getLocalAudioUri } from '@/services/audioCache';
 import {
   configureAudioSession,
   getPlayer,
@@ -49,6 +49,7 @@ export function AudioProvider({ children }) {
   const lastPersist = useRef(0);
   const durationSavedFor = useRef(null);
   const currentAudioRef = useRef(null);
+  const loadedFilenameRef = useRef(null);
   const actionLock = useRef(false);
   const loadGen = useRef(0);
 
@@ -113,6 +114,35 @@ export function AudioProvider({ children }) {
     );
   }, [status.duration, currentAudio]);
 
+  const playExisting = useCallback(() => {
+    const player = playerRef.current;
+    const current = player?.currentTime ?? 0;
+    const duration = player?.duration ?? 0;
+
+    if (duration > 0 && current >= Math.max(0, duration - 0.35)) {
+      svcSeekTo(0).then(() => svcPlay()).catch(() => {
+        try { svcPlay(); } catch (_) { /* ignore */ }
+      });
+      return;
+    }
+
+    svcPlay();
+  }, []);
+
+  const playNewSource = useCallback((startPositionMs, gen) => {
+    const resumeAt = Math.max(0, (startPositionMs || 0) / 1_000);
+    if (resumeAt > 0) {
+      setTimeout(() => {
+        if (gen !== loadGen.current) return;
+        svcSeekTo(resumeAt).then(() => svcPlay()).catch(() => {
+          try { svcPlay(); } catch (_) { /* ignore */ }
+        });
+      }, 250);
+      return;
+    }
+    svcPlay();
+  }, []);
+
   const loadAudio = useCallback(async (audioRecord, startPositionMs = 0) => {
     if (!audioRecord?.filename) {
       setAudioError(new Error('No filename on audio record.'));
@@ -120,12 +150,48 @@ export function AudioProvider({ children }) {
     }
 
     const gen = ++loadGen.current;
-    setAudioLoading(true);
     setAudioError(null);
-    setDownloadProgress(null);
+
+    // Already in the player — play/pause must not replace the source or flash loading.
+    if (loadedFilenameRef.current === audioRecord.filename) {
+      setAudioLoading(false);
+      setDownloadProgress(null);
+      if (currentAudioRef.current?.id !== audioRecord.id) {
+        setCurrentAudio(audioRecord);
+      }
+      try {
+        playExisting();
+      } catch (err) {
+        setAudioError(err);
+      }
+      return;
+    }
+
     setCurrentAudio(audioRecord);
     durationSavedFor.current = null;
     lastPersist.current = 0;
+
+    // Sync cache hit: use the local URI immediately. Never set audioLoading.
+    const cachedUri = getCachedAudioUri(audioRecord.filename);
+    if (cachedUri) {
+      setAudioLoading(false);
+      setDownloadProgress(null);
+      try {
+        loadSource({ uri: cachedUri });
+        loadedFilenameRef.current = audioRecord.filename;
+        try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
+        playNewSource(startPositionMs, gen);
+      } catch (err) {
+        if (gen !== loadGen.current) return;
+        loadedFilenameRef.current = null;
+        console.error('[AudioContext] loadAudio failed:', err);
+        setAudioError(err);
+      }
+      return;
+    }
+
+    setAudioLoading(true);
+    setDownloadProgress(0);
 
     try {
       const uri = await getLocalAudioUri(audioRecord.filename, {
@@ -137,21 +203,12 @@ export function AudioProvider({ children }) {
       if (gen !== loadGen.current) return;
 
       loadSource({ uri });
+      loadedFilenameRef.current = audioRecord.filename;
       try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
-
-      const resumeAt = Math.max(0, (startPositionMs || 0) / 1_000);
-      if (resumeAt > 0) {
-        // Brief delay so the new source is ready before seeking
-        setTimeout(() => {
-          if (gen !== loadGen.current) return;
-          svcSeekTo(resumeAt).catch(() => {});
-          try { svcPlay(); } catch (_) { /* ignore */ }
-        }, 250);
-      } else {
-        svcPlay();
-      }
+      playNewSource(startPositionMs, gen);
     } catch (err) {
       if (gen !== loadGen.current) return;
+      loadedFilenameRef.current = null;
       console.error('[AudioContext] loadAudio failed:', err);
       setAudioError(err);
     } finally {
@@ -160,7 +217,7 @@ export function AudioProvider({ children }) {
         setDownloadProgress(null);
       }
     }
-  }, [playbackRate]);
+  }, [playbackRate, playExisting, playNewSource]);
 
   const play = useCallback(() => {
     if (actionLock.current) return;

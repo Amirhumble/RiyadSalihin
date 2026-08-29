@@ -231,7 +231,7 @@ export default function ReaderScreen() {
 const PlayerBar = memo(function PlayerBar({ audio }) {
   const {
     currentAudio, audioError, clearAudioError,
-    isPlaying, isBuffering, audioLoading,
+    isPlaying, audioLoading,
     currentTime, duration, didJustFinish,
     playbackRate, downloadProgress,
     loadAudio, play, pause, seek, setSpeed,
@@ -240,7 +240,9 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
   const isThis = currentAudio?.id === audio?.id;
   const playing = isThis && isPlaying && !didJustFinish;
   const isDownloading = isThis && audioLoading && downloadProgress != null;
-  const buffering = isThis && (isBuffering || audioLoading);
+  // Spinner only while a remote download is in progress — never for a cache check
+  // or expo-audio isBuffering on a local file (that flash is what made play feel slow).
+  const showPlaySpinner = isThis && audioLoading;
   const time = isThis ? currentTime : 0;
   const dur = isThis && duration > 0 ? duration : 0;
   const downloadPct = Math.round(Math.min(Math.max(downloadProgress ?? 0, 0), 1) * 100);
@@ -397,10 +399,10 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
       loadAudio(audio, audio.position_ms ?? 0);
       return;
     }
-    if (isDownloading) return;
+    if (audioLoading) return;
     if (playing) pause();
     else play();
-  }, [isThis, playing, audio, audioError, isDownloading, loadAudio, play, pause, clearAudioError]);
+  }, [isThis, playing, audio, audioError, audioLoading, loadAudio, play, pause, clearAudioError]);
 
   const handleRetryDownload = useCallback(() => {
     clearAudioError();
@@ -537,9 +539,9 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           activeOpacity={0.85}
           accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}
           accessibilityRole="button"
-          accessibilityState={{ busy: buffering, checked: playing }}
+          accessibilityState={{ busy: showPlaySpinner, checked: playing }}
         >
-          {buffering ? (
+          {showPlaySpinner ? (
             <ActivityIndicator color={colors.hero} size="small" />
           ) : (
             <Ionicons

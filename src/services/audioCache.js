@@ -41,13 +41,18 @@ export function getCachedAudioPath(filename) {
   return new File(getCacheDir(), safe);
 }
 
-export function isAudioCached(filename) {
+export function getCachedAudioUri(filename) {
   try {
     const file = getCachedAudioPath(filename);
-    return Boolean(file.exists && file.size > 0);
+    if (file.exists && file.size > 0) return file.uri;
   } catch {
-    return false;
+    // missing or unreadable cache entry
   }
+  return null;
+}
+
+export function isAudioCached(filename) {
+  return getCachedAudioUri(filename) != null;
 }
 
 function removeIfExists(file) {
@@ -144,9 +149,8 @@ async function downloadToCache(filename, onProgress, signal) {
 export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
   const safe = sanitizeAudioFilename(filename);
 
-  if (isAudioCached(safe)) {
-    return getCachedAudioPath(safe).uri;
-  }
+  const cachedUri = getCachedAudioUri(safe);
+  if (cachedUri) return cachedUri;
 
   if (inflight.has(safe)) {
     return inflight.get(safe);

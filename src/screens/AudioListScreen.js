@@ -1,16 +1,19 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
+  Keyboard,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import DownloadAllBar from '@/components/audio/DownloadAllBar';
+import AppModal from '@/components/common/AppModal';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
 import colors from '@/constants/colors';
@@ -20,6 +23,7 @@ import { getAllAudios } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
 import { preparePdfAsset } from '@/services/pdfAsset';
 import { formatHadithRange } from '@/utils/formatHadithRange';
+import { findLessonByHadithNumber, parseHadithNumber } from '@/utils/hadithSearch';
 
 function fmtMs(ms) {
   const n = Number(ms);
@@ -37,6 +41,8 @@ function fmtSec(sec) {
 
 export default function AudioListScreen() {
   const router = useRouter();
+  const [hadithQuery, setHadithQuery] = useState('');
+  const [searchDialog, setSearchDialog] = useState(null);
 
   const { data: audios, loading, error, refetch } = useDbQuery(
     () => getAllAudios(),
@@ -81,6 +87,35 @@ export default function AudioListScreen() {
     [router]
   );
 
+  const closeSearchDialog = useCallback(() => setSearchDialog(null), []);
+
+  const handleHadithSearch = useCallback(() => {
+    Keyboard.dismiss();
+    const parsed = parseHadithNumber(hadithQuery);
+    if (!parsed.ok) {
+      setSearchDialog({
+        title: parsed.reason === 'empty' ? 'Enter a hadith number' : 'Invalid hadith number',
+        message: parsed.reason === 'empty'
+          ? 'Type a hadith number to open the lesson that contains it.'
+          : 'Please enter a whole number, for example 25.',
+        actions: [{ label: 'OK', onPress: closeSearchDialog }],
+      });
+      return;
+    }
+
+    const lesson = findLessonByHadithNumber(audios, parsed.value);
+    if (!lesson) {
+      setSearchDialog({
+        title: 'Hadith not found',
+        message: `No lesson contains hadith ${parsed.value}.`,
+        actions: [{ label: 'OK', onPress: closeSearchDialog }],
+      });
+      return;
+    }
+
+    handlePress(lesson);
+  }, [audios, closeSearchDialog, hadithQuery, handlePress]);
+
   if (loading) return <ScreenLoader message="Loading lessons…" />;
   if (error) {
     return (
@@ -108,6 +143,35 @@ export default function AudioListScreen() {
               ? `${count} lesson${count !== 1 ? 's' : ''} · Tap a lesson to listen and read`
               : 'Select a lesson to listen and read'}
           </Text>
+
+          <View style={styles.searchRow}>
+            <TextInput
+              style={styles.searchInput}
+              value={hadithQuery}
+              onChangeText={setHadithQuery}
+              placeholder="Hadith number"
+              placeholderTextColor={colors.heroMuted}
+              keyboardType="number-pad"
+              returnKeyType="search"
+              onSubmitEditing={handleHadithSearch}
+              maxLength={6}
+              selectTextOnFocus
+              autoCorrect={false}
+              autoCapitalize="none"
+              underlineColorAndroid="transparent"
+              accessibilityLabel="Search by hadith number"
+              accessibilityHint="Enter a hadith number to open its lesson"
+            />
+            <TouchableOpacity
+              style={styles.searchBtn}
+              onPress={handleHadithSearch}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open lesson for this hadith"
+            >
+              <Text style={styles.searchBtnText}>Open</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -127,6 +191,15 @@ export default function AudioListScreen() {
         maxToRenderPerBatch={15}
         windowSize={10}
         initialNumToRender={12}
+      />
+
+      <AppModal
+        visible={Boolean(searchDialog)}
+        title={searchDialog?.title}
+        message={searchDialog?.message}
+        dismissable
+        onClose={closeSearchDialog}
+        actions={searchDialog?.actions}
       />
     </View>
   );
@@ -302,6 +375,38 @@ const styles = StyleSheet.create({
     color: colors.heroMuted,
     textAlign: 'center',
     letterSpacing: 0.3,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.md,
+    width: '100%',
+    gap: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(201,168,76,0.35)',
+    paddingHorizontal: spacing.md,
+    color: colors.heroText,
+    fontSize: 15,
+  },
+  searchBtn: {
+    height: 44,
+    minWidth: 72,
+    paddingHorizontal: spacing.md,
+    borderRadius: 12,
+    backgroundColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBtnText: {
+    color: colors.heroDark,
+    fontWeight: '700',
+    fontSize: 14,
   },
   listContent: {
     paddingTop: spacing.xs,
