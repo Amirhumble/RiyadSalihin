@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 
+import AppModal from '@/components/common/AppModal';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import {
@@ -23,8 +23,17 @@ export default function DownloadAllBar({ audios }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [summary, setSummary] = useState(null);
+  const [dialog, setDialog] = useState(null);
 
   const lessonCount = audios?.length ?? 0;
+
+  const closeDialog = useCallback(() => {
+    setDialog(null);
+  }, []);
+
+  const showDialog = useCallback((next) => {
+    setDialog(next);
+  }, []);
 
   const statusLabel = useMemo(() => {
     if (!progress) return null;
@@ -52,6 +61,7 @@ export default function DownloadAllBar({ audios }) {
   const startDownload = useCallback(async (list) => {
     setBusy(true);
     setSummary(null);
+    setDialog(null);
     setProgress({
       phase: 'scan',
       total: list.length,
@@ -66,22 +76,61 @@ export default function DownloadAllBar({ audios }) {
       });
       setSummary(result);
       setProgress(null);
-    } catch (err) {
-      if (err?.code === 'ALREADY_RUNNING') {
-        Alert.alert('Download in progress', 'Please wait for the current download to finish, or cancel it.');
+
+      const allOffline = !result.cancelled
+        && result.failed.length === 0
+        && result.cached.length + result.downloaded.length === result.total
+        && result.total > 0;
+
+      if (allOffline) {
+        showDialog({
+          title: 'All lessons available offline',
+          message: `${result.total} lesson${result.total === 1 ? '' : 's'} are saved on this device. You can listen without internet.`,
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
+      } else if (result.cancelled) {
+        showDialog({
+          title: 'Download stopped',
+          message: `${result.downloaded.length} downloaded · ${result.cached.length} already saved. Finished lessons stay on this device.`,
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
       } else {
-        Alert.alert(
-          'Could not download lessons',
-          err?.code === 'DOWNLOAD_REQUIRED' || String(err?.message || '').toLowerCase().includes('network')
-            ? 'Connect to the internet and try again.'
-            : 'Something went wrong while downloading. Please try again.'
-        );
+        showDialog({
+          title: 'Download finished',
+          message: [
+            `${result.downloaded.length} downloaded`,
+            `${result.cached.length} already saved`,
+            result.failed.length ? `${result.failed.length} failed` : null,
+            result.failed.length
+              ? 'Failed lessons can be downloaded again. Saved lessons stay on this device.'
+              : null,
+          ].filter(Boolean).join('\n'),
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
+      }
+    } catch (err) {
+      const offline = err?.code === 'DOWNLOAD_REQUIRED'
+        || String(err?.message || '').toLowerCase().includes('network');
+      if (err?.code === 'ALREADY_RUNNING') {
+        showDialog({
+          title: 'Download in progress',
+          message: 'Please wait for the current download to finish, or cancel it.',
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
+      } else {
+        showDialog({
+          title: offline ? 'No internet connection' : 'Could not download lessons',
+          message: offline
+            ? 'Connect to the internet and try again. Lessons already saved on this device will still play offline.'
+            : 'Something went wrong while downloading. Please try again.',
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
       }
       setProgress(null);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [closeDialog, showDialog]);
 
   const handlePress = useCallback(async () => {
     if (busy || isDownloadAllRunning()) return;
@@ -99,15 +148,21 @@ export default function DownloadAllBar({ audios }) {
           cancelled: false,
           total,
         });
+        showDialog({
+          title: 'All lessons available offline',
+          message: `${total} lesson${total === 1 ? '' : 's'} are already saved on this device.`,
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
         return;
       }
 
       const estimate = await estimateMissingBytes(missing);
       if (estimate.networkFailures === missing.length && estimate.sizedCount === 0) {
-        Alert.alert(
-          'No internet connection',
-          'Connect to the internet to download lessons. Lessons already saved on this device will still play offline.'
-        );
+        showDialog({
+          title: 'No internet connection',
+          message: 'Connect to the internet to download lessons. Lessons already saved on this device will still play offline.',
+          actions: [{ label: 'OK', onPress: closeDialog }],
+        });
         return;
       }
 
@@ -118,32 +173,50 @@ export default function DownloadAllBar({ audios }) {
           : `\n\nAt least ${sizeLabel} to download.`
         : '';
 
-      Alert.alert(
-        'Download all lessons?',
-        `${missing.length} lesson${missing.length === 1 ? '' : 's'} will be saved for offline listening. ${cached.length} already on this device.${sizeLine}`,
-        [
-          { text: 'Not now', style: 'cancel' },
+      showDialog({
+        title: 'Download all lessons?',
+        message: `${missing.length} lesson${missing.length === 1 ? '' : 's'} will be saved for offline listening. ${cached.length} already on this device.${sizeLine}`,
+        dismissable: true,
+        actions: [
+          { label: 'Not now', variant: 'secondary', onPress: closeDialog },
           {
-            text: 'Download',
+            label: 'Download',
             onPress: () => {
+              closeDialog();
               startDownload(audios);
             },
           },
-        ]
-      );
+        ],
+      });
     } catch (err) {
-      Alert.alert(
-        'No internet connection',
-        'Connect to the internet to download lessons. Lessons already saved on this device will still play offline.'
-      );
+      showDialog({
+        title: 'No internet connection',
+        message: 'Connect to the internet to download lessons. Lessons already saved on this device will still play offline.',
+        actions: [{ label: 'OK', onPress: closeDialog }],
+      });
     } finally {
       if (!isDownloadAllRunning()) setBusy(false);
     }
-  }, [audios, busy, lessonCount, startDownload]);
+  }, [audios, busy, closeDialog, lessonCount, showDialog, startDownload]);
 
   const handleCancel = useCallback(() => {
-    cancelDownloadAll();
-  }, []);
+    showDialog({
+      title: 'Stop downloading?',
+      message: 'Lessons that already finished will stay on this device. You can continue the rest later.',
+      dismissable: true,
+      actions: [
+        { label: 'Keep downloading', variant: 'secondary', onPress: closeDialog },
+        {
+          label: 'Stop download',
+          variant: 'destructive',
+          onPress: () => {
+            closeDialog();
+            cancelDownloadAll();
+          },
+        },
+      ],
+    });
+  }, [closeDialog, showDialog]);
 
   if (!lessonCount) return null;
 
@@ -222,6 +295,16 @@ export default function DownloadAllBar({ audios }) {
           )}
         </TouchableOpacity>
       )}
+
+      <AppModal
+        visible={Boolean(dialog)}
+        title={dialog?.title}
+        message={dialog?.message}
+        loading={Boolean(dialog?.loading)}
+        dismissable={dialog?.dismissable !== false}
+        onClose={closeDialog}
+        actions={dialog?.actions}
+      />
     </View>
   );
 }
