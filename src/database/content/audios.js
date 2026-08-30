@@ -409,6 +409,654 @@ const audios = [
     ordering: 50,
     pdf_page: 122,
   },
+
+  {
+    filename: '051.mp3',
+    title: 'ክፍል 051',
+    hadith_number_from: 240,
+    hadith_number_to: 245,
+    ordering: 51,
+    pdf_page: 125,
+  },
+
+  {
+    filename: '052.mp3',
+    title: 'ክፍል 052',
+    hadith_number_from: 246,
+    hadith_number_to: 251,
+    ordering: 52,
+    pdf_page: 126,
+  },
+
+  {
+    filename: '053.mp3',
+    title: 'ክፍል 053',
+    hadith_number_from: 252,
+    hadith_number_to: 259,
+    ordering: 53,
+    pdf_page: 129,
+  },
+
+  {
+    filename: '054.mp3',
+    title: 'ክፍል 054',
+    hadith_number_from: 260,
+    hadith_number_to: 272,
+    ordering: 54,
+    pdf_page: 134,
+  },
+
+  {
+    filename: '055.mp3',
+    title: 'ክፍል 055',
+    hadith_number_from: 273,
+    hadith_number_to: 278,
+    ordering: 55,
+    pdf_page: 135,
+  },
+
+  {
+    filename: '056.mp3',
+    title: 'ክፍል 056',
+    hadith_number_from: 279,
+    hadith_number_to: 288,
+    ordering: 56,
+    pdf_page: 140,
+  },
+
+  {
+    filename: '057.mp3',
+    title: 'ክፍል 057',
+    hadith_number_from: 289,
+    hadith_number_to: 297,
+    ordering: 57,
+    pdf_page: 143,
+  },
+
+  {
+    filename: '058.mp3',
+    title: 'ክፍል 058',
+    hadith_number_from: 298,
+    hadith_number_to: 305,
+    ordering: 58,
+    pdf_page: 146,
+  },
+
+  {
+    filename: '059.mp3',
+    title: 'ክፍል 059',
+    hadith_number_from: 306,
+    hadith_number_to: 314,
+    ordering: 59,
+    pdf_page: 149,
+  },
+
+  {
+    filename: '060.mp3',
+    title: 'ክፍል 060',
+    hadith_number_from: 315,
+    hadith_number_to: 322,
+    ordering: 60,
+    pdf_page: 151,
+  },
+
+  {
+    filename: '061.mp3',
+    title: 'ክፍል 061',
+    hadith_number_from: 323,
+    hadith_number_to: 330,
+    ordering: 61,
+    pdf_page: 155,
+  },
+
+  {
+    filename: '062.mp3',
+    title: 'ክፍል 062',
+    hadith_number_from: 331,
+    hadith_number_to: 340,
+    ordering: 62,
+    pdf_page: 157,
+  },
+
+  {
+    filename: '063.mp3',
+    title: 'ክፍል 063',
+    hadith_number_from: 341,
+    hadith_number_to: 345,
+    ordering: 63,
+    pdf_page: 161,
+  },
+
+  {
+    filename: '064.mp3',
+    title: 'ክፍል 064',
+    hadith_number_from: 346,
+    hadith_number_to: 351,
+    ordering: 64,
+    pdf_page: 164,
+  },
+
+  {
+    filename: '065.mp3',
+    title: 'ክፍል 065',
+    hadith_number_from: 352,
+    hadith_number_to: 359,
+    ordering: 65,
+    pdf_page: 167,
+  },
+
+  {
+    filename: '066.mp3',
+    title: 'ክፍል 066',
+    hadith_number_from: 360,
+    hadith_number_to: 370,
+    ordering: 66,
+    pdf_page: 169,
+  },
+
+  {
+    filename: '067.mp3',
+    title: 'ክፍል 067',
+    hadith_number_from: 371,
+    hadith_number_to: 374,
+    ordering: 67,
+    pdf_page: 172,
+  },
+
+  {
+    filename: '068.mp3',
+    title: 'ክፍል 068',
+    hadith_number_from: 375,
+    hadith_number_to: 382,
+    ordering: 68,
+    pdf_page: 175,
+  },
+
+  {
+    filename: '069.mp3',
+    title: 'ክፍል 069',
+    hadith_number_from: 383,
+    hadith_number_to: 388,
+    ordering: 69,
+    pdf_page: 177,
+  },
+
+  {
+    filename: '070.mp3',
+    title: 'ክፍል 070',
+    hadith_number_from: 389,
+    hadith_number_to: 395,
+    ordering: 70,
+    pdf_page: 180,
+  },
+
+  {
+    filename: '071.mp3',
+    title: 'ክፍል 071',
+    hadith_number_from: 396,
+    hadith_number_to: 400,
+    ordering: 71,
+    pdf_page: 184,
+  },
+
+  {
+    filename: '072.mp3',
+    title: 'ክፍል 072',
+    hadith_number_from: 401,
+    hadith_number_to: 411,
+    ordering: 72,
+    pdf_page: 186,
+  },
+
+  {
+    filename: '073.mp3',
+    title: 'ክፍል 073',
+    hadith_number_from: 412,
+    hadith_number_to: 416,
+    ordering: 73,
+    pdf_page: 190,
+  },
+
+  {
+    filename: '074.mp3',
+    title: 'ክፍል 074',
+    hadith_number_from: 417,
+    hadith_number_to: 423,
+    ordering: 74,
+    pdf_page: 192,
+  },
+
+  {
+    filename: '075.mp3',
+    title: 'ክፍል 075',
+    hadith_number_from: 424,
+    hadith_number_to: 432,
+    ordering: 75,
+    pdf_page: 196,
+  },
+
+  {
+    filename: '076.mp3',
+    title: 'ክፍል 076',
+    hadith_number_from: 433,
+    hadith_number_to: 439,
+    ordering: 76,
+    pdf_page: 199,
+  },
+
+  {
+    filename: '077.mp3',
+    title: 'ክፍል 077',
+    hadith_number_from: 440,
+    hadith_number_to: 445,
+    ordering: 77,
+    pdf_page: 204,
+  },
+
+  {
+    filename: '078.mp3',
+    title: 'ክፍል 078',
+    hadith_number_from: 446,
+    hadith_number_to: 456,
+    ordering: 78,
+    pdf_page: 206,
+  },
+
+  {
+    filename: '079.mp3',
+    title: 'ክፍል 079',
+    hadith_number_from: 457,
+    hadith_number_to: 463,
+    ordering: 79,
+    pdf_page: 210,
+  },
+
+  {
+    filename: '080.mp3',
+    title: 'ክፍል 080',
+    hadith_number_from: 464,
+    hadith_number_to: 474,
+    ordering: 80,
+    pdf_page: 212,
+  },
+
+  {
+    filename: '081.mp3',
+    title: 'ክፍል 081',
+    hadith_number_from: 475,
+    hadith_number_to: 485,
+    ordering: 81,
+    pdf_page: 215,
+  },
+
+  {
+    filename: '082.mp3',
+    title: 'ክፍል 082',
+    hadith_number_from: 486,
+    hadith_number_to: 489,
+    ordering: 82,
+    pdf_page: 218,
+  },
+
+  {
+    filename: '083.mp3',
+    title: 'ክፍል 083',
+    hadith_number_from: 490,
+    hadith_number_to: 498,
+    ordering: 83,
+    pdf_page: 219,
+  },
+
+  {
+    filename: '084.mp3',
+    title: 'ክፍል 084',
+    hadith_number_from: 499,
+    hadith_number_to: 508,
+    ordering: 84,
+    pdf_page: 224,
+  },
+
+  {
+    filename: '085.mp3',
+    title: 'ክፍል 085',
+    hadith_number_from: 509,
+    hadith_number_to: 518,
+    ordering: 85,
+    pdf_page: 227,
+  },
+
+  {
+    filename: '086.mp3',
+    title: 'ክፍል 086',
+    hadith_number_from: 519,
+    hadith_number_to: 521,
+    ordering: 86,
+    pdf_page: 230,
+  },
+
+  {
+    filename: '087.mp3',
+    title: 'ክፍል 087',
+    hadith_number_from: 522,
+    hadith_number_to: 532,
+    ordering: 87,
+    pdf_page: 235,
+  },
+
+  {
+    filename: '088.mp3',
+    title: 'ክፍል 088',
+    hadith_number_from: 533,
+    hadith_number_to: 543,
+    ordering: 88,
+    pdf_page: 238,
+  },
+
+  {
+    filename: '089.mp3',
+    title: 'ክፍል 089',
+    hadith_number_from: 544,
+    hadith_number_to: 556,
+    ordering: 89,
+    pdf_page: 242,
+  },
+
+  {
+    filename: '090.mp3',
+    title: 'ክፍል 090',
+    hadith_number_from: 557,
+    hadith_number_to: 562,
+    ordering: 90,
+    pdf_page: 244,
+  },
+
+  {
+    filename: '091.mp3',
+    title: 'ክፍል 091',
+    hadith_number_from: 563,
+    hadith_number_to: 568,
+    ordering: 91,
+    pdf_page: 248,
+  },
+
+  {
+    filename: '092.mp3',
+    title: 'ክፍል 092',
+    hadith_number_from: 569,
+    hadith_number_to: 573,
+    ordering: 92,
+    pdf_page: 250,
+  },
+
+  {
+    filename: '093.mp3',
+    title: 'ክፍል 093',
+    hadith_number_from: 574,
+    hadith_number_to: 575,
+    ordering: 93,
+    pdf_page: 253,
+  },
+
+  {
+    filename: '094.mp3',
+    title: 'ክፍል 094',
+    hadith_number_from: 576,
+    hadith_number_to: 584,
+    ordering: 94,
+    pdf_page: 254,
+  },
+
+  {
+    filename: '095.mp3',
+    title: 'ክፍል 095',
+    hadith_number_from: 585,
+    hadith_number_to: 592,
+    ordering: 95,
+    pdf_page: 256,
+  },
+
+  {
+    filename: '096.mp3',
+    title: 'ክፍል 096',
+    hadith_number_from: 593,
+    hadith_number_to: 601,
+    ordering: 96,
+    pdf_page: 259,
+  },
+
+  {
+    filename: '097.mp3',
+    title: 'ክፍል 097',
+    hadith_number_from: 602,
+    hadith_number_to: 611,
+    ordering: 97,
+    pdf_page: 263,
+  },
+
+  {
+    filename: '098.mp3',
+    title: 'ክፍል 098',
+    hadith_number_from: 612,
+    hadith_number_to: 620,
+    ordering: 98,
+    pdf_page: 265,
+  },
+
+  {
+    filename: '099.mp3',
+    title: 'ክፍል 099',
+    hadith_number_from: 621,
+    hadith_number_to: 631,
+    ordering: 99,
+    pdf_page: 267,
+  },
+
+  {
+    filename: '100.mp3',
+    title: 'ክፍል 100',
+    hadith_number_from: 632,
+    hadith_number_to: 642,
+    ordering: 100,
+    pdf_page: 270,
+  },
+
+  {
+    filename: '101.mp3',
+    title: 'ክፍል 101',
+    hadith_number_from: 643,
+    hadith_number_to: 647,
+    ordering: 101,
+    pdf_page: 272,
+  },
+
+  {
+    filename: '102.mp3',
+    title: 'ክፍል 102',
+    hadith_number_from: 648,
+    hadith_number_to: 652,
+    ordering: 102,
+    pdf_page: 273,
+  },
+
+  {
+    filename: '103.mp3',
+    title: 'ክፍል 103',
+    hadith_number_from: 653,
+    hadith_number_to: 658,
+    ordering: 103,
+    pdf_page: 276,
+  },
+
+  {
+    filename: '104.mp3',
+    title: 'ክፍል 104',
+    hadith_number_from: 659,
+    hadith_number_to: 667,
+    ordering: 104,
+    pdf_page: 277,
+  },
+
+  {
+    filename: '105.mp3',
+    title: 'ክፍል 105',
+    hadith_number_from: 668,
+    hadith_number_to: 677,
+    ordering: 105,
+    pdf_page: 279,
+  },
+
+  {
+    filename: '106.mp3',
+    title: 'ክፍል 106',
+    hadith_number_from: 678,
+    hadith_number_to: 684,
+    ordering: 106,
+    pdf_page: 283,
+  },
+
+  {
+    filename: '108.mp3',
+    title: 'ክፍል 108',
+    hadith_number_from: 692,
+    hadith_number_to: 698,
+    ordering: 108,
+    pdf_page: 289,
+  },
+
+  {
+    filename: '109.mp3',
+    title: 'ክፍል 109',
+    hadith_number_from: 699,
+    hadith_number_to: 703,
+    ordering: 109,
+    pdf_page: 290,
+  },
+
+  {
+    filename: '110.mp3',
+    title: 'ክፍል 110',
+    hadith_number_from: 704,
+    hadith_number_to: 708,
+    ordering: 110,
+    pdf_page: 293,
+  },
+
+  {
+    filename: '111.mp3',
+    title: 'ክፍል 111',
+    hadith_number_from: 709,
+    hadith_number_to: 711,
+    ordering: 111,
+    pdf_page: 295,
+  },
+
+  {
+    filename: '112.mp3',
+    title: 'ክፍል 112',
+    hadith_number_from: 712,
+    hadith_number_to: 718,
+    ordering: 112,
+    pdf_page: 299,
+  },
+
+  {
+    filename: '113.mp3',
+    title: 'ክፍል 113',
+    hadith_number_from: 719,
+    hadith_number_to: 727,
+    ordering: 113,
+    pdf_page: 301,
+  },
+
+  {
+    filename: '114.mp3',
+    title: 'ክፍል 114',
+    hadith_number_from: 728,
+    hadith_number_to: 739,
+    ordering: 114,
+    pdf_page: 305,
+  },
+
+  {
+    filename: '115.mp3',
+    title: 'ክፍል 115',
+    hadith_number_from: 740,
+    hadith_number_to: 747,
+    ordering: 115,
+    pdf_page: 308,
+  },
+
+  {
+    filename: '116.mp3',
+    title: 'ክፍል 116',
+    hadith_number_from: 748,
+    hadith_number_to: 761,
+    ordering: 116,
+    pdf_page: 310,
+  },
+
+  {
+    filename: '117.mp3',
+    title: 'ክፍል 117',
+    hadith_number_from: 762,
+    hadith_number_to: 773,
+    ordering: 117,
+    pdf_page: 313,
+  },
+
+  {
+    filename: '118.mp3',
+    title: 'ክፍል 118',
+    hadith_number_from: 774,
+    hadith_number_to: 778,
+    ordering: 118,
+    pdf_page: 316,
+  },
+
+  {
+    filename: '119.mp3',
+    title: 'ክፍል 119',
+    hadith_number_from: 779,
+    hadith_number_to: 788,
+    ordering: 119,
+    pdf_page: 318,
+  },
+
+  {
+    filename: '120.mp3',
+    title: 'ክፍል 120',
+    hadith_number_from: 789,
+    hadith_number_to: 796,
+    ordering: 120,
+    pdf_page: 321,
+  },
+
+  {
+    filename: '121.mp3',
+    title: 'ክፍል 121',
+    hadith_number_from: 797,
+    hadith_number_to: 801,
+    ordering: 121,
+    pdf_page: 323,
+  },
+
+  {
+    filename: '122.mp3',
+    title: 'ክፍል 122',
+    hadith_number_from: 802,
+    hadith_number_to: 813,
+    ordering: 122,
+    pdf_page: 326,
+  },
+
+  {
+    filename: '123.mp3',
+    title: 'ክፍል 123',
+    hadith_number_from: 814,
+    hadith_number_to: 824,
+    ordering: 123,
+    pdf_page: 329,
+  },
 ];
 
 export default audios;
