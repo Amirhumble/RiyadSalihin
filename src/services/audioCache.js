@@ -55,6 +55,14 @@ export function isAudioCached(filename) {
   return getCachedAudioUri(filename) != null;
 }
 
+export function isAudioDownloadInflight(filename) {
+  try {
+    return inflight.has(sanitizeAudioFilename(filename));
+  } catch {
+    return false;
+  }
+}
+
 function removeIfExists(file) {
   try {
     if (file.exists) file.delete();

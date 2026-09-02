@@ -19,7 +19,8 @@ import {
 } from 'react';
 
 import { saveDuration, savePlaybackPosition } from '@/database/repositories/audioRepository';
-import { getCachedAudioUri, getLocalAudioUri } from '@/services/audioCache';
+import { getCachedAudioUri, getLocalAudioUri, isAudioDownloadInflight } from '@/services/audioCache';
+import { getRemoteAudioUrl } from '@/services/audioRemote';
 import {
   configureAudioSession,
   getPlayer,
@@ -34,6 +35,14 @@ import {
 const PERSIST_INTERVAL_MS = 5_000;
 const SPEED_STORAGE_KEY = '@riyadus:playback_speed';
 const DEFAULT_SPEED = 1;
+const STREAM_READY_TIMEOUT_MS = 25_000;
+
+function playbackError(code, message, cause) {
+  const err = new Error(message);
+  err.code = code;
+  if (cause) err.cause = cause;
+  return err;
+}
 
 const AudioStableContext = createContext(null);
 const AudioLiveContext = createContext(null);
@@ -52,6 +61,7 @@ export function AudioProvider({ children }) {
   const loadedFilenameRef = useRef(null);
   const actionLock = useRef(false);
   const loadGen = useRef(0);
+  const pendingStartRef = useRef(null);
 
   const status = useAudioPlayerStatus(playerRef.current);
 
@@ -114,6 +124,52 @@ export function AudioProvider({ children }) {
     );
   }, [status.duration, currentAudio]);
 
+  // Remote streams: drop the spinner as soon as the player has enough data.
+  useEffect(() => {
+    if (!audioLoading) return;
+    if (status.isLoaded || status.playing) {
+      setAudioLoading(false);
+    }
+  }, [audioLoading, status.isLoaded, status.playing]);
+
+  // Seek to a saved position only after the remote/local source is actually ready.
+  useEffect(() => {
+    const pending = pendingStartRef.current;
+    if (!pending) return;
+    if (pending.gen !== loadGen.current) return;
+    if (!status.isLoaded) return;
+
+    pendingStartRef.current = null;
+    const resumeAt = Math.max(0, (pending.startPositionMs || 0) / 1_000);
+    if (resumeAt <= 0) return;
+
+    svcSeekTo(resumeAt).then(() => svcPlay()).catch(() => {
+      try { svcPlay(); } catch (_) { /* ignore */ }
+    });
+  }, [status.isLoaded]);
+
+  // If a remote stream never becomes ready, surface a retryable error.
+  useEffect(() => {
+    if (!audioLoading) return undefined;
+    const gen = loadGen.current;
+    const timeoutId = setTimeout(() => {
+      if (gen !== loadGen.current) return;
+      const player = playerRef.current;
+      if (player?.isLoaded || player?.playing) {
+        setAudioLoading(false);
+        return;
+      }
+      pendingStartRef.current = null;
+      loadedFilenameRef.current = null;
+      setAudioLoading(false);
+      setAudioError(playbackError(
+        'DOWNLOAD_FAILED',
+        'Could not start this lesson. Check your connection and try again.'
+      ));
+    }, STREAM_READY_TIMEOUT_MS);
+    return () => clearTimeout(timeoutId);
+  }, [audioLoading]);
+
   const playExisting = useCallback(() => {
     const player = playerRef.current;
     const current = player?.currentTime ?? 0;
@@ -154,6 +210,7 @@ export function AudioProvider({ children }) {
 
     // Already in the player — play/pause must not replace the source or flash loading.
     if (loadedFilenameRef.current === audioRecord.filename) {
+      pendingStartRef.current = null;
       setAudioLoading(false);
       setDownloadProgress(null);
       if (currentAudioRef.current?.id !== audioRecord.id) {
@@ -174,6 +231,7 @@ export function AudioProvider({ children }) {
     // Sync cache hit: use the local URI immediately. Never set audioLoading.
     const cachedUri = getCachedAudioUri(audioRecord.filename);
     if (cachedUri) {
+      pendingStartRef.current = null;
       setAudioLoading(false);
       setDownloadProgress(null);
       try {
@@ -190,33 +248,67 @@ export function AudioProvider({ children }) {
       return;
     }
 
+    // Cache miss: stream the remote MP3 immediately (ExoPlayer HTTP),
+    // and save a local copy in the background for offline / Download All.
     setAudioLoading(true);
-    setDownloadProgress(0);
+    setDownloadProgress(isAudioDownloadInflight(audioRecord.filename) ? null : 0);
+    pendingStartRef.current = { gen, startPositionMs };
 
     try {
-      const uri = await getLocalAudioUri(audioRecord.filename, {
-        onProgress: (progress) => {
-          if (gen !== loadGen.current) return;
-          setDownloadProgress(progress);
-        },
+      const remoteUrl = getRemoteAudioUrl(audioRecord.filename);
+      loadSource({
+        uri: remoteUrl,
+        headers: { Accept: 'audio/mpeg,audio/*,*/*' },
       });
-      if (gen !== loadGen.current) return;
-
-      loadSource({ uri });
       loadedFilenameRef.current = audioRecord.filename;
       try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
-      playNewSource(startPositionMs, gen);
+      svcPlay();
     } catch (err) {
       if (gen !== loadGen.current) return;
+      pendingStartRef.current = null;
       loadedFilenameRef.current = null;
-      console.error('[AudioContext] loadAudio failed:', err);
+      console.error('[AudioContext] loadAudio stream failed:', err);
       setAudioError(err);
-    } finally {
-      if (gen === loadGen.current) {
-        setAudioLoading(false);
-        setDownloadProgress(null);
-      }
+      setAudioLoading(false);
+      setDownloadProgress(null);
+      return;
     }
+
+    getLocalAudioUri(audioRecord.filename, {
+      onProgress: (progress) => {
+        if (gen !== loadGen.current) return;
+        setDownloadProgress(progress);
+      },
+    }).then((localUri) => {
+      if (gen !== loadGen.current) return;
+      setDownloadProgress(null);
+
+      const player = playerRef.current;
+      const alreadyPlaying = Boolean(player?.playing || (player?.isLoaded && (player?.currentTime ?? 0) > 0.2));
+      if (alreadyPlaying) return;
+
+      try {
+        loadSource({ uri: localUri });
+        loadedFilenameRef.current = audioRecord.filename;
+        try { svcSetRate(playbackRate); } catch (_) { /* ignore */ }
+        pendingStartRef.current = null;
+        playNewSource(startPositionMs, gen);
+        setAudioLoading(false);
+        setAudioError(null);
+      } catch (err) {
+        if (gen !== loadGen.current) return;
+        console.warn('[AudioContext] local fallback after cache failed:', err);
+      }
+    }).catch((err) => {
+      if (gen !== loadGen.current) return;
+      setDownloadProgress(null);
+      const player = playerRef.current;
+      if (player?.playing || player?.isLoaded) return;
+      pendingStartRef.current = null;
+      loadedFilenameRef.current = null;
+      setAudioLoading(false);
+      setAudioError(err);
+    });
   }, [playbackRate, playExisting, playNewSource]);
 
   const play = useCallback(() => {

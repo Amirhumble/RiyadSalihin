@@ -239,10 +239,10 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const isThis = currentAudio?.id === audio?.id;
   const playing = isThis && isPlaying && !didJustFinish;
-  const isDownloading = isThis && audioLoading && downloadProgress != null;
-  // Spinner only while a remote download is in progress — never for a cache check
+  const isDownloading = isThis && downloadProgress != null && downloadProgress < 1;
+  // Spinner only while the source is still starting — never for a cache check
   // or expo-audio isBuffering on a local file (that flash is what made play feel slow).
-  const showPlaySpinner = isThis && audioLoading;
+  const showPlaySpinner = isThis && audioLoading && !playing;
   const time = isThis ? currentTime : 0;
   const dur = isThis && duration > 0 ? duration : 0;
   const downloadPct = Math.round(Math.min(Math.max(downloadProgress ?? 0, 0), 1) * 100);
@@ -471,7 +471,9 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
       {isThis && isDownloading ? (
         <View style={pl.downloadRow}>
-          <Text style={pl.downloadText}>Downloading {downloadPct}%</Text>
+          <Text style={pl.downloadText}>
+            {playing ? `Saving for offline ${downloadPct}%` : `Downloading ${downloadPct}%`}
+          </Text>
           <View style={pl.downloadTrack}>
             <View style={[pl.downloadFill, { width: `${downloadPct}%` }]} />
           </View>

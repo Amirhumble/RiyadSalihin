@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import TelegramCta from '@/components/common/TelegramCta';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { preparePdfAsset } from '@/services/pdfAsset';
@@ -25,7 +26,7 @@ export default function IntroScreen() {
   }, []);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroDark} />
 
       <View style={styles.ringTopRight} pointerEvents="none" />
@@ -36,16 +37,25 @@ export default function IntroScreen() {
       <View style={styles.goldRuleBottom} pointerEvents="none" />
 
       <View style={styles.content}>
+        <Text style={styles.kicker}>Gardens of the Righteous</Text>
         <Text style={styles.arabicTitle}>رياض الصالحين</Text>
         <View style={styles.goldDivider} />
         <Text style={styles.latinTitle}>Riyad as-Salihin</Text>
-        <Text style={styles.subtitle}>Gardens of the Righteous</Text>
-        <Text style={styles.author}>
-          Imam Yahya ibn Sharaf al-Nawawi
-        </Text>
-         <Text style={styles.teacher}>
-          በሸይኽ ሙሀመድ አሚን ኢድሪስ 
-        </Text>
+        <Text style={styles.author}>Imam Yahya ibn Sharaf al-Nawawi</Text>
+        <Text style={styles.teacherLabel}>Taught by</Text>
+        <Text style={styles.teacher}>በሸይኽ ሙሀመድ አሚን ኢድሪስ</Text>
+      </View>
+
+      <View style={styles.footer}>
+        <TelegramCta variant="hero" />
+        <View style={styles.openingRow}>
+          <View style={styles.openingDots}>
+            <View style={[styles.dot, styles.dotOn]} />
+            <View style={styles.dot} />
+            <View style={styles.dot} />
+          </View>
+          <Text style={styles.openingText}>Opening lessons</Text>
+        </View>
       </View>
     </View>
   );
@@ -55,8 +65,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.hero,
-    alignItems: 'center',
-    justifyContent: 'center',
     overflow: 'hidden',
   },
   ringTopRight: {
@@ -108,25 +116,35 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   content: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: spacing.xl,
   },
+  kicker: {
+    fontSize: 12,
+    color: colors.gold,
+    textAlign: 'center',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+    marginBottom: spacing.md,
+  },
   arabicTitle: {
-    fontSize: 54,
+    fontSize: 52,
     fontWeight: '700',
     color: colors.heroText,
     textAlign: 'center',
     writingDirection: 'rtl',
     letterSpacing: 2,
-    marginBottom: spacing.lg,
-    lineHeight: 68,
+    marginBottom: spacing.md,
+    lineHeight: 66,
   },
   goldDivider: {
-    width: 64,
+    width: 56,
     height: 2,
     backgroundColor: colors.gold,
     borderRadius: 1,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     opacity: 0.85,
   },
   latinTitle: {
@@ -134,30 +152,60 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.heroText,
     textAlign: 'center',
-    letterSpacing: 2.5,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.heroSubtext,
-    textAlign: 'center',
-    letterSpacing: 0.5,
+    letterSpacing: 2.2,
     marginBottom: spacing.sm,
   },
   author: {
     fontSize: 13,
-    color: colors.heroMuted,
+    color: colors.heroSubtext,
     textAlign: 'center',
     fontStyle: 'italic',
     letterSpacing: 0.3,
+    marginBottom: spacing.xl,
   },
-
-  teacher: {
-    fontSize: 16,
+  teacherLabel: {
+    fontSize: 11,
     color: colors.heroMuted,
     textAlign: 'center',
-    fontStyle: 'italic',
-    letterSpacing: 0.3,
-    marginTop: spacing.xl + spacing.sm,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  teacher: {
+    fontSize: 18,
+    color: colors.gold,
+    textAlign: 'center',
+    letterSpacing: 0.2,
+    fontWeight: '600',
+  },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    gap: spacing.md,
+  },
+  openingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 20,
+  },
+  openingDots: {
+    flexDirection: 'row',
+    gap: 5,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  dotOn: {
+    backgroundColor: colors.gold,
+  },
+  openingText: {
+    fontSize: 12,
+    color: colors.heroMuted,
+    letterSpacing: 0.4,
   },
 });

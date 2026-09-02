@@ -16,6 +16,7 @@ import DownloadAllBar from '@/components/audio/DownloadAllBar';
 import AppModal from '@/components/common/AppModal';
 import ScreenError from '@/components/common/ScreenError';
 import ScreenLoader from '@/components/common/ScreenLoader';
+import TelegramCta from '@/components/common/TelegramCta';
 import colors from '@/constants/colors';
 import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
@@ -116,7 +117,7 @@ export default function AudioListScreen() {
     handlePress(lesson);
   }, [audios, closeSearchDialog, hadithQuery, handlePress]);
 
-  if (loading) return <ScreenLoader message="Loading lessons…" />;
+  if (loading) return <ScreenLoader message="Loading lessons…" variant="lessons" />;
   if (error) {
     return (
       <ScreenError
@@ -143,6 +144,10 @@ export default function AudioListScreen() {
               ? `${count} lesson${count !== 1 ? 's' : ''} · Tap a lesson to listen and read`
               : 'Select a lesson to listen and read'}
           </Text>
+
+          <View style={styles.headerCta}>
+            <TelegramCta variant="hero" />
+          </View>
 
           <View style={styles.searchRow}>
             <TextInput
@@ -334,7 +339,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.md,
     alignItems: 'center',
     overflow: 'hidden',
   },
@@ -375,6 +380,11 @@ const styles = StyleSheet.create({
     color: colors.heroMuted,
     textAlign: 'center',
     letterSpacing: 0.3,
+    lineHeight: 18,
+  },
+  headerCta: {
+    width: '100%',
+    marginTop: spacing.md,
   },
   searchRow: {
     flexDirection: 'row',
@@ -443,9 +453,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.background,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md + 2,
     paddingHorizontal: spacing.md,
-    minHeight: 76,
+    minHeight: 80,
   },
   rowActive: { backgroundColor: colors.primaryLight },
   badge: {
@@ -467,11 +477,11 @@ const styles = StyleSheet.create({
   badgeTextActive: { color: colors.textInverse },
   info: { flex: 1, marginRight: spacing.sm },
   title: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
     lineHeight: 22,
-    marginBottom: 2,
+    marginBottom: 3,
   },
   titleActive: { color: colors.primary },
   range: {
