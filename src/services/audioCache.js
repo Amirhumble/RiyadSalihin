@@ -55,6 +55,16 @@ export function isAudioCached(filename) {
   return getCachedAudioUri(filename) != null;
 }
 
+export function getCachedAudioBytes(filename) {
+  try {
+    const file = getCachedAudioPath(filename);
+    if (file.exists && file.size > 0) return file.size;
+  } catch {
+    // missing or unreadable cache entry
+  }
+  return 0;
+}
+
 export function isAudioDownloadInflight(filename) {
   try {
     return inflight.has(sanitizeAudioFilename(filename));
@@ -93,7 +103,7 @@ async function downloadToCache(filename, onProgress, signal) {
   removeIfExists(finalFile);
 
   const url = getRemoteAudioUrl(safe);
-  onProgress?.(0);
+  onProgress?.(0, { bytesWritten: 0, totalBytes: null });
 
   let downloaded;
   try {
@@ -102,8 +112,9 @@ async function downloadToCache(filename, onProgress, signal) {
       signal,
       onProgress: ({ bytesWritten, totalBytes }) => {
         if (!onProgress) return;
-        if (!totalBytes || totalBytes < 0) return;
-        onProgress(Math.min(1, bytesWritten / totalBytes));
+        const knownTotal = totalBytes > 0 ? totalBytes : null;
+        const ratio = knownTotal ? Math.min(1, bytesWritten / knownTotal) : null;
+        onProgress(ratio, { bytesWritten, totalBytes: knownTotal });
       },
     });
     downloaded = await task.downloadAsync();
@@ -145,7 +156,8 @@ async function downloadToCache(filename, onProgress, signal) {
     throw makeError('DOWNLOAD_FAILED', 'Could not save the downloaded lesson.', err);
   }
 
-  onProgress?.(1);
+  const savedBytes = finalFile.size > 0 ? finalFile.size : null;
+  onProgress?.(1, { bytesWritten: savedBytes, totalBytes: savedBytes });
 
   if (!finalFile.exists || finalFile.size <= 0) {
     throw makeError('DOWNLOAD_FAILED', 'Could not save the downloaded lesson.');
@@ -154,25 +166,56 @@ async function downloadToCache(filename, onProgress, signal) {
   return finalFile.uri;
 }
 
+function notifyProgress(entry, ratio, meta) {
+  entry.lastRatio = ratio;
+  entry.lastMeta = meta;
+  for (const fn of entry.listeners) {
+    try { fn(ratio, meta); } catch { /* listener errors must not fail the download */ }
+  }
+}
+
 export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
   const safe = sanitizeAudioFilename(filename);
 
   const cachedUri = getCachedAudioUri(safe);
   if (cachedUri) return cachedUri;
 
-  if (inflight.has(safe)) {
-    return inflight.get(safe);
+  const existing = inflight.get(safe);
+  if (existing) {
+    if (onProgress) {
+      existing.listeners.add(onProgress);
+      if (existing.lastRatio != null || existing.lastMeta) {
+        try { onProgress(existing.lastRatio, existing.lastMeta); } catch { /* ignore */ }
+      }
+    }
+    try {
+      return await existing.promise;
+    } finally {
+      if (onProgress) existing.listeners.delete(onProgress);
+    }
   }
 
   if (signal?.aborted) {
     throw makeError('ABORTED', 'Download cancelled.');
   }
 
-  const promise = downloadToCache(safe, onProgress, signal).finally(() => {
+  const entry = {
+    listeners: new Set(),
+    lastRatio: null,
+    lastMeta: undefined,
+    promise: null,
+  };
+  if (onProgress) entry.listeners.add(onProgress);
+
+  entry.promise = downloadToCache(
+    safe,
+    (ratio, meta) => notifyProgress(entry, ratio, meta),
+    signal
+  ).finally(() => {
     inflight.delete(safe);
   });
-  inflight.set(safe, promise);
-  return promise;
+  inflight.set(safe, entry);
+  return entry.promise;
 }
 
 export async function probeRemoteAudioBytes(filename) {

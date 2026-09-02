@@ -277,6 +277,7 @@ export function AudioProvider({ children }) {
     getLocalAudioUri(audioRecord.filename, {
       onProgress: (progress) => {
         if (gen !== loadGen.current) return;
+        if (progress == null) return;
         setDownloadProgress(progress);
       },
     }).then((localUri) => {

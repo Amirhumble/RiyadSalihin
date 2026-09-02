@@ -46,6 +46,7 @@ function AppShell() {
         <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
           <Stack.Screen name="index" options={{ animation: 'none' }} />
           <Stack.Screen name="list" options={{ animation: 'fade' }} />
+          <Stack.Screen name="downloads" options={{ animation: 'slide_from_right' }} />
           {/* Fade keeps the persistent Pdf host aligned with the slot.
               slide_from_bottom left the native view at the final frame
               while the chrome was still animating. */}
