@@ -1,22 +1,22 @@
 {
   "expo": {
-    "name": "RiyadusSalihinApp",
+    "name": "RiyadusSalihin",
     "slug": "riyadusalihin",
     "version": "1.0.0",
      "newArchEnabled": false,
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon.jpg",
     "scheme": "riyadussalihinapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.jpg"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/android-icon-foreground.jpg",
+        "backgroundImage": "./assets/images/android-icon-background.jpg",
+        "monochromeImage": "./assets/images/android-icon-monochrome.jpg"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.amirtofik.riyadussalihin"
@@ -31,7 +31,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-icon.jpg",
           "imageWidth": 76
         }
       ],
