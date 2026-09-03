@@ -9,12 +9,15 @@ export function sanitizeAudioFilename(filename) {
   return base;
 }
 
+const FALLBACK_AUDIO_BASE_URL =
+  'https://pub-1be73d585aea4edb857616059935d6da.r2.dev';
+
 export function getAudioStoragePath(filename) {
   return `audio/${sanitizeAudioFilename(filename)}`;
 }
 
 export function getRemoteAudioUrl(filename) {
-  const base = process.env.EXPO_PUBLIC_AUDIO_BASE_URL;
+  const base = process.env.EXPO_PUBLIC_AUDIO_BASE_URL || FALLBACK_AUDIO_BASE_URL;
   if (!base || !String(base).trim()) {
     const err = new Error('Audio storage is not configured.');
     err.code = 'NOT_CONFIGURED';

@@ -6,16 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "EXPO_PUBLIC_AUDIO_BASE_URL": "https://pub-1be73d585aea4edb857616059935d6da.r2.dev"
+      }
     },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_AUDIO_BASE_URL": "https://pub-1be73d585aea4edb857616059935d6da.r2.dev"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_AUDIO_BASE_URL": "https://pub-1be73d585aea4edb857616059935d6da.r2.dev"
+      }
     }
   },
   "submit": {

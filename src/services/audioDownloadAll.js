@@ -79,6 +79,28 @@ function slimAudio(audio) {
   };
 }
 
+function serializeCause(cause) {
+  if (cause == null) return null;
+  if (typeof cause === 'string') return cause;
+  if (typeof cause === 'object') {
+    return {
+      name: cause.name ?? null,
+      code: cause.code ?? null,
+      message: cause.message != null ? String(cause.message) : String(cause),
+    };
+  }
+  return String(cause);
+}
+
+function withDownloadError(audio, err) {
+  return {
+    ...audio,
+    errorCode: err?.code ?? null,
+    errorMessage: err?.message ? String(err.message) : String(err || 'Download failed'),
+    errorCause: serializeCause(err?.cause),
+  };
+}
+
 function applySnapshot(partial, { flush = false } = {}) {
   pendingPatch = pendingPatch ? { ...pendingPatch, ...partial } : { ...partial };
   if (flush) {
@@ -418,7 +440,10 @@ export async function downloadAllAudios(audios, { onProgress, estimatedBytes } =
           cancelled = true;
           statuses[audio.filename] = 'idle';
         } else {
-          failed.push(audio);
+          const missingFileErr = new Error('Download finished but the file was not saved.');
+          missingFileErr.code = 'DOWNLOAD_FAILED';
+          console.warn('[downloadAll] failed', audio.filename, missingFileErr.code, missingFileErr.message);
+          failed.push(withDownloadError(audio, missingFileErr));
           statuses[audio.filename] = 'failed';
         }
       } catch (err) {
@@ -426,7 +451,14 @@ export async function downloadAllAudios(audios, { onProgress, estimatedBytes } =
           cancelled = true;
           statuses[audio.filename] = 'idle';
         } else {
-          failed.push(audio);
+          console.warn(
+            '[downloadAll] failed',
+            audio.filename,
+            err?.code,
+            err?.message,
+            err?.cause
+          );
+          failed.push(withDownloadError(audio, err));
           statuses[audio.filename] = 'failed';
         }
       } finally {
