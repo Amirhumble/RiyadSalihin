@@ -45,3 +45,6 @@ example
 # generated native folders
 /ios
 /android
+
+# local brand-asset QA composites (not shipped)
+assets/images/_previews/
