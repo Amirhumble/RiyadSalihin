@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
   },
   card: {
     backgroundColor: colors.background,
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     maxHeight: '80%',
     elevation: 12,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 16,

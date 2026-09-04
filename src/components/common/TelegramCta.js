@@ -78,14 +78,14 @@ const styles = StyleSheet.create({
   },
   btnHero: {
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.heroFill,
     borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.55)',
+    borderColor: colors.heroBorder,
   },
   btnBanner: {
     backgroundColor: colors.primaryLight,
     borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.45)',
+    borderColor: colors.primarySoft,
   },
   iconWrap: {
     width: 36,
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   iconHero: {
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroText,
   },
   iconBanner: {
     backgroundColor: colors.primary,
@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   chevronHero: {
-    color: colors.gold,
+    color: colors.heroAccent,
   },
   chevronBanner: {
     color: colors.primary,

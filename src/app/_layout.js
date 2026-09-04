@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import colors from '@/constants/colors';
 import { AppProvider, DB_STATUS, useAppContext } from '@/context/AppContext';
 import { AudioProvider } from '@/context/AudioContext';
 import { PdfSessionProvider } from '@/context/PdfSessionContext';
@@ -54,7 +55,7 @@ function AppShell() {
             name="reader"
             options={{
               animation: 'fade',
-              contentStyle: { backgroundColor: '#F4F4F4' },
+              contentStyle: { backgroundColor: colors.backgroundSecondary },
             }}
           />
         </Stack>
@@ -79,27 +80,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   errorIcon: { fontSize: 44, marginBottom: 16 },
   errorTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: colors.text,
     textAlign: 'center',
     marginBottom: 8,
   },
   errorMsg: {
     fontSize: 14,
-    color: '#888',
+    color: colors.textMuted,
     textAlign: 'center',
     marginBottom: 28,
   },
   retryBtn: {
     paddingVertical: 12,
     paddingHorizontal: 32,
-    backgroundColor: '#1B5E7B',
+    backgroundColor: colors.primary,
     borderRadius: 10,
   },
-  retryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  retryText: { color: colors.textInverse, fontSize: 16, fontWeight: '600' },
 });

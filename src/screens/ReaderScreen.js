@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
   headerSafe: {
     backgroundColor: colors.heroDark,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: colors.heroFill,
   },
   header: {
     flexDirection: 'row',
@@ -710,7 +710,7 @@ const styles = StyleSheet.create({
   },
   headerRightSpacer: { width: 72 },
   pageBadge: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.heroFill,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
@@ -724,12 +724,12 @@ const styles = StyleSheet.create({
   },
   pdfArea: {
     flex: 1,
-    backgroundColor: '#EDEDE9',
+    backgroundColor: colors.paper,
     position: 'relative',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#EDEDE9',
+    backgroundColor: colors.paper,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
@@ -781,7 +781,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.18,
     shadowRadius: 8,
@@ -830,7 +830,7 @@ const pl = StyleSheet.create({
   },
   downloadText: {
     fontSize: 12,
-    color: colors.gold,
+    color: colors.heroAccent,
     textAlign: 'center',
     marginBottom: 6,
     fontWeight: '600',
@@ -838,12 +838,12 @@ const pl = StyleSheet.create({
   downloadTrack: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: colors.heroBorder,
     overflow: 'hidden',
   },
   downloadFill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroAccent,
     borderRadius: 2,
   },
   errorRow: {
@@ -853,7 +853,7 @@ const pl = StyleSheet.create({
   },
   errorText: {
     fontSize: 12,
-    color: colors.gold,
+    color: colors.errorOnDark,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -885,12 +885,12 @@ const pl = StyleSheet.create({
   trackBg: {
     height: 5,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: colors.heroBorder,
     overflow: 'hidden',
   },
   trackFill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroAccent,
     borderRadius: 3,
   },
   thumb: {
@@ -899,13 +899,13 @@ const pl = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.heroText,
     borderWidth: 3,
-    borderColor: colors.gold,
+    borderColor: colors.primary,
     marginTop: -10,
     marginLeft: -10,
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.35,
     shadowRadius: 3,
@@ -930,7 +930,7 @@ const pl = StyleSheet.create({
     minWidth: 44,
     minHeight: 33,
     borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.heroFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
@@ -950,13 +950,13 @@ const pl = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.28,
     shadowRadius: 5,
   },
   playBtnActive: {
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroText,
   },
   playIconOffset: {
     marginLeft: 3,
@@ -967,16 +967,16 @@ const pl = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.heroFill,
     borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.45)',
+    borderColor: colors.heroBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
   speedLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.gold,
+    color: colors.heroAccent,
     letterSpacing: 0.3,
   },
 });
@@ -984,7 +984,7 @@ const pl = StyleSheet.create({
 const sp = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
   },
   sheet: {
     position: 'absolute',

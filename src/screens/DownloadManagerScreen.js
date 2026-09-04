@@ -31,7 +31,6 @@ import {
   scanDownloadAllCache,
 } from '@/services/audioDownloadAll';
 
-const FAILED = '#B42318';
 const ROW_HEIGHT = 52;
 
 function lessonLabel(audio) {
@@ -457,7 +456,7 @@ const LessonRow = memo(function LessonRow({ audio, status, progress }) {
     icon = 'time-outline';
   } else if (status === 'failed') {
     statusText = 'Failed';
-    statusColor = FAILED;
+    statusColor = colors.error;
     icon = 'alert-circle';
   }
 
@@ -490,7 +489,7 @@ const styles = StyleSheet.create({
   headerSafe: {
     backgroundColor: colors.heroDark,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: colors.heroFill,
   },
   header: {
     flexDirection: 'row',
@@ -557,11 +556,11 @@ const styles = StyleSheet.create({
   },
   statePillDone: {
     color: colors.success,
-    backgroundColor: '#E7F4EC',
+    backgroundColor: colors.successLight,
   },
   statePillFailed: {
-    color: FAILED,
-    backgroundColor: '#FDECEC',
+    color: colors.error,
+    backgroundColor: colors.errorLight,
   },
   percent: {
     fontSize: 20,
@@ -597,7 +596,7 @@ const styles = StyleSheet.create({
   },
   fill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.primary,
     borderRadius: 4,
   },
   currentCard: {
@@ -634,7 +633,7 @@ const styles = StyleSheet.create({
   currentTrack: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(27,94,123,0.15)',
+    backgroundColor: colors.primarySoft,
     overflow: 'hidden',
   },
   currentFill: {
@@ -728,7 +727,7 @@ const styles = StyleSheet.create({
   },
   rowFill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.primary,
     borderRadius: 2,
   },
   rowStatus: {

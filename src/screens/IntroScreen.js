@@ -33,13 +33,13 @@ export default function IntroScreen() {
       <View style={styles.ringTopRightSmall} pointerEvents="none" />
       <View style={styles.ringBottomLeft} pointerEvents="none" />
 
-      <View style={styles.goldRuleTop} pointerEvents="none" />
-      <View style={styles.goldRuleBottom} pointerEvents="none" />
+      <View style={styles.accentRuleTop} pointerEvents="none" />
+      <View style={styles.accentRuleBottom} pointerEvents="none" />
 
       <View style={styles.content}>
         <Text style={styles.kicker}>Gardens of the Righteous</Text>
         <Text style={styles.arabicTitle}>رياض الصالحين</Text>
-        <View style={styles.goldDivider} />
+        <View style={styles.accentDivider} />
         <Text style={styles.latinTitle}>Riyad as-Salihin</Text>
         <Text style={styles.author}>Imam Yahya ibn Sharaf al-Nawawi</Text>
         <Text style={styles.teacherLabel}>Taught by</Text>
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
     height: 300,
     borderRadius: 150,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.heroRing,
   },
   ringTopRightSmall: {
     position: 'absolute',
@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
     height: 180,
     borderRadius: 90,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: colors.heroRingMuted,
   },
   ringBottomLeft: {
     position: 'absolute',
@@ -95,25 +95,25 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 110,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: colors.heroRingMuted,
   },
-  goldRuleTop: {
+  accentRuleTop: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: 3,
-    backgroundColor: colors.gold,
-    opacity: 0.6,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.35,
   },
-  goldRuleBottom: {
+  accentRuleBottom: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     height: 3,
-    backgroundColor: colors.gold,
-    opacity: 0.6,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.35,
   },
   content: {
     flex: 1,
@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   },
   kicker: {
     fontSize: 12,
-    color: colors.gold,
+    color: colors.heroAccent,
     textAlign: 'center',
     letterSpacing: 1.6,
     textTransform: 'uppercase',
@@ -139,13 +139,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 66,
   },
-  goldDivider: {
+  accentDivider: {
     width: 56,
     height: 2,
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroAccent,
     borderRadius: 1,
     marginBottom: spacing.md,
-    opacity: 0.85,
+    opacity: 0.7,
   },
   latinTitle: {
     fontSize: 22,
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
   },
   teacher: {
     fontSize: 18,
-    color: colors.gold,
+    color: colors.heroText,
     textAlign: 'center',
     letterSpacing: 0.2,
     fontWeight: '600',
@@ -198,10 +198,10 @@ const styles = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: colors.heroBorder,
   },
   dotOn: {
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroAccent,
   },
   openingText: {
     fontSize: 12,

@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import colors from '@/constants/colors';
 import {
   getCachedPdfUri,
   preparePdfAsset,
@@ -471,7 +472,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 2,
     elevation: 2,
-    backgroundColor: '#EDEDE9',
+    backgroundColor: colors.paper,
     overflow: 'hidden',
   },
   hostHidden: {
@@ -481,6 +482,6 @@ const styles = StyleSheet.create({
   pdf: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#EDEDE9',
+    backgroundColor: colors.paper,
   },
 });

@@ -135,7 +135,7 @@ export default function AudioListScreen() {
 
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
         <View style={styles.header}>
-          <View style={styles.headerGoldRule} />
+          <View style={styles.headerAccentRule} />
           <Text style={styles.headerArabic}>رياض الصالحين</Text>
           <Text style={styles.headerLatin}>Riyad as-Salihin</Text>
           <View style={styles.headerDivider} />
@@ -343,12 +343,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
-  headerGoldRule: {
+  headerAccentRule: {
     position: 'absolute',
     top: 0, left: 0, right: 0,
     height: 2,
-    backgroundColor: colors.gold,
-    opacity: 0.55,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.35,
   },
   headerArabic: {
     fontSize: 30,
@@ -370,8 +370,8 @@ const styles = StyleSheet.create({
   headerDivider: {
     width: 36,
     height: 1,
-    backgroundColor: colors.gold,
-    opacity: 0.5,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.4,
     marginVertical: spacing.sm,
     borderRadius: 1,
   },
@@ -397,9 +397,9 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.heroFill,
     borderWidth: 1,
-    borderColor: 'rgba(201,168,76,0.35)',
+    borderColor: colors.heroBorder,
     paddingHorizontal: spacing.md,
     color: colors.heroText,
     fontSize: 15,
@@ -409,12 +409,12 @@ const styles = StyleSheet.create({
     minWidth: 72,
     paddingHorizontal: spacing.md,
     borderRadius: 12,
-    backgroundColor: colors.gold,
+    backgroundColor: colors.heroText,
     alignItems: 'center',
     justifyContent: 'center',
   },
   searchBtnText: {
-    color: colors.heroDark,
+    color: colors.primary,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.primary,
     borderRadius: 2,
   },
   playBtn: {

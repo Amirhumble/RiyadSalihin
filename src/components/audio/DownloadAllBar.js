@@ -125,13 +125,13 @@ const styles = StyleSheet.create({
   track: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(27,94,123,0.15)',
+    backgroundColor: colors.primarySoft,
     overflow: 'hidden',
     marginTop: 8,
   },
   fill: {
     height: '100%',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.primary,
     borderRadius: 2,
   },
 });

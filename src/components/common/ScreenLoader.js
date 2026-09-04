@@ -23,12 +23,12 @@ export default function ScreenLoader({ message = 'Loading…', variant = 'defaul
       <View style={styles.lessonsRoot}>
         <SafeAreaView style={styles.headerSafe} edges={['top']}>
           <View style={styles.header}>
-            <View style={styles.headerGoldRule} />
+            <View style={styles.headerAccentRule} />
             <Text style={styles.headerArabic}>رياض الصالحين</Text>
             <Text style={styles.headerLatin}>Riyad as-Salihin</Text>
             <View style={styles.headerDivider} />
             <View style={styles.openingRow}>
-              <ActivityIndicator size="small" color={colors.gold} />
+              <ActivityIndicator size="small" color={colors.heroAccent} />
               <Text style={styles.headerMessage}>{message}</Text>
             </View>
           </View>
@@ -84,14 +84,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
-  headerGoldRule: {
+  headerAccentRule: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     height: 2,
-    backgroundColor: colors.gold,
-    opacity: 0.55,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.35,
   },
   headerArabic: {
     fontSize: 30,
@@ -113,8 +113,8 @@ const styles = StyleSheet.create({
   headerDivider: {
     width: 36,
     height: 1,
-    backgroundColor: colors.gold,
-    opacity: 0.5,
+    backgroundColor: colors.heroAccent,
+    opacity: 0.4,
     marginVertical: spacing.sm,
     borderRadius: 1,
   },
