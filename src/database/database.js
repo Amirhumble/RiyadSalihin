@@ -5,6 +5,7 @@ import { up as migration001 } from './migrations/001_initial';
 import { up as migration002 } from './migrations/002_add_pdf_page';
 import { up as migration003 } from './migrations/003_audio_chapter_range';
 import { up as migration004 } from './migrations/004_audio_hadith_range';
+import { up as migration005 } from './migrations/005_audio_completed';
 import { SCHEMA_VERSION } from './schema';
 
 const DB_NAME = 'riyadus_salihin.db';
@@ -14,6 +15,7 @@ const MIGRATIONS = [
   { version: 2, up: migration002 },
   { version: 3, up: migration003 },
   { version: 4, up: migration004 },
+  { version: 5, up: migration005 },
 ];
 
 let _db = null;

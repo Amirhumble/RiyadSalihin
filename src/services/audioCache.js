@@ -1,5 +1,10 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
+import {
+  cachedFileIsUsable,
+  isTempCacheName,
+  performCacheDownload,
+} from './cacheDownload';
 import { getRemoteAudioUrl, sanitizeAudioFilename } from './audioRemote';
 
 const CACHE_DIR_NAME = 'audio-cache';
@@ -12,22 +17,6 @@ function makeError(code, message, cause) {
   return err;
 }
 
-function isLikelyOffline(err) {
-  const msg = String(err?.message || err || '').toLowerCase();
-  return (
-    msg.includes('network') ||
-    msg.includes('internet') ||
-    msg.includes('offline') ||
-    msg.includes('failed to connect') ||
-    msg.includes('unable to resolve') ||
-    msg.includes('timed out') ||
-    msg.includes('timeout') ||
-    msg.includes('unabletodownload') ||
-    msg.includes('unable to download') ||
-    err?.name === 'AbortError'
-  );
-}
-
 function getCacheDir() {
   const dir = new Directory(Paths.document, CACHE_DIR_NAME);
   if (!dir.exists) {
@@ -36,19 +25,68 @@ function getCacheDir() {
   return dir;
 }
 
+function readAvailableBytes() {
+  try {
+    const value = Number(Paths.availableDiskSpace);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function readReceiptBytes(file) {
+  try {
+    if (!file.exists || file.size <= 0) return null;
+    const value = Number(String(file.textSync()).trim());
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function removeIfExists(file) {
+  try {
+    if (file?.exists) file.delete();
+  } catch {
+    // ignore cleanup failures
+  }
+}
+
+function bindAbort(controller, signal) {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    controller.abort();
+    return () => {};
+  }
+  const onAbort = () => controller.abort();
+  signal.addEventListener('abort', onAbort);
+  return () => signal.removeEventListener('abort', onAbort);
+}
+
 export function getCachedAudioPath(filename) {
   const safe = sanitizeAudioFilename(filename);
   return new File(getCacheDir(), safe);
 }
 
+function cachedEntry(filename) {
+  const safe = sanitizeAudioFilename(filename);
+  const dir = getCacheDir();
+  const file = new File(dir, safe);
+  const receipt = new File(dir, `${safe}.bytes`);
+  if (!file.exists) return null;
+  const receiptBytes = readReceiptBytes(receipt);
+  // An incomplete file is not a saved lesson. Leave it on disk so a failed
+  // retry cannot be the thing that deletes the only copy.
+  if (!cachedFileIsUsable({ size: file.size, receiptBytes })) return null;
+  return file;
+}
+
 export function getCachedAudioUri(filename) {
   try {
-    const file = getCachedAudioPath(filename);
-    if (file.exists && file.size > 0) return file.uri;
+    return cachedEntry(filename)?.uri ?? null;
   } catch {
-    // missing or unreadable cache entry
+    return null;
   }
-  return null;
 }
 
 export function isAudioCached(filename) {
@@ -57,12 +95,10 @@ export function isAudioCached(filename) {
 
 export function getCachedAudioBytes(filename) {
   try {
-    const file = getCachedAudioPath(filename);
-    if (file.exists && file.size > 0) return file.size;
+    return cachedEntry(filename)?.size ?? 0;
   } catch {
-    // missing or unreadable cache entry
+    return 0;
   }
-  return 0;
 }
 
 export function isAudioDownloadInflight(filename) {
@@ -73,16 +109,26 @@ export function isAudioDownloadInflight(filename) {
   }
 }
 
-function removeIfExists(file) {
+function purgeOrphanTempFiles() {
+  let dir;
   try {
-    if (file.exists) file.delete();
+    dir = getCacheDir();
   } catch {
-    // ignore cleanup failures
+    return;
   }
-}
-
-function isAbortError(err) {
-  return err?.name === 'AbortError' || err?.code === 'ABORTED';
+  let entries = [];
+  try {
+    entries = dir.list();
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const name = entry?.name || '';
+    if (!isTempCacheName(name)) continue;
+    const base = name.slice(0, -'.tmp'.length);
+    if (inflight.has(base)) continue;
+    removeIfExists(entry);
+  }
 }
 
 async function downloadToCache(filename, onProgress, signal) {
@@ -90,79 +136,57 @@ async function downloadToCache(filename, onProgress, signal) {
   const dir = getCacheDir();
   const finalFile = new File(dir, safe);
   const tmpFile = new File(dir, `${safe}.tmp`);
+  const receiptFile = new File(dir, `${safe}.bytes`);
+  let task = null;
+  let resultFile = tmpFile;
 
-  if (finalFile.exists && finalFile.size > 0) {
-    return finalFile.uri;
-  }
-
-  if (signal?.aborted) {
-    throw makeError('ABORTED', 'Download cancelled.');
-  }
-
-  removeIfExists(tmpFile);
-  removeIfExists(finalFile);
-
-  const url = getRemoteAudioUrl(safe);
-  onProgress?.(0, { bytesWritten: 0, totalBytes: null });
-
-  let downloaded;
-  try {
-    const task = File.createDownloadTask(url, tmpFile, {
-      headers: { Accept: 'audio/mpeg,audio/*,*/*' },
-      signal,
-      onProgress: ({ bytesWritten, totalBytes }) => {
-        if (!onProgress) return;
-        const knownTotal = totalBytes > 0 ? totalBytes : null;
-        const ratio = knownTotal ? Math.min(1, bytesWritten / knownTotal) : null;
-        onProgress(ratio, { bytesWritten, totalBytes: knownTotal });
-      },
-    });
-    downloaded = await task.downloadAsync();
-  } catch (err) {
-    removeIfExists(tmpFile);
-    if (isAbortError(err) || signal?.aborted) {
-      throw makeError('ABORTED', 'Download cancelled.', err);
-    }
-    if (isLikelyOffline(err)) {
-      throw makeError(
-        'DOWNLOAD_REQUIRED',
-        'This lesson needs to be downloaded first. Connect to the internet and try again.',
-        err
-      );
-    }
-    throw makeError(
-      'DOWNLOAD_FAILED',
-      'Could not download this lesson. Check your connection and try again.',
-      err
-    );
-  }
-
-  const resultFile = downloaded && downloaded.exists ? downloaded : tmpFile;
-  if (!resultFile.exists || resultFile.size <= 0) {
-    removeIfExists(tmpFile);
-    throw makeError(
-      'DOWNLOAD_FAILED',
-      'Could not download this lesson. Check your connection and try again.'
-    );
-  }
-
-  try {
-    if (finalFile.exists) finalFile.delete();
-    if (resultFile.uri !== finalFile.uri) {
-      resultFile.moveSync(finalFile);
-    }
-  } catch (err) {
-    removeIfExists(tmpFile);
-    throw makeError('DOWNLOAD_FAILED', 'Could not save the downloaded lesson.', err);
-  }
-
-  const savedBytes = finalFile.size > 0 ? finalFile.size : null;
-  onProgress?.(1, { bytesWritten: savedBytes, totalBytes: savedBytes });
+  await performCacheDownload({
+    signal,
+    availableBytes: readAvailableBytes(),
+    readAvailableBytes,
+    readFinal: () => ({
+      exists: Boolean(finalFile.exists),
+      size: finalFile.exists ? finalFile.size : 0,
+      receiptBytes: readReceiptBytes(receiptFile),
+    }),
+    removeTemp: () => removeIfExists(tmpFile),
+    removeFinal: () => {
+      removeIfExists(finalFile);
+      removeIfExists(receiptFile);
+    },
+    onProgress,
+    downloadToTemp: async ({ onBytes }) => {
+      const url = getRemoteAudioUrl(safe);
+      task = File.createDownloadTask(url, tmpFile, {
+        headers: { Accept: 'audio/mpeg,audio/*,*/*' },
+        signal,
+        onProgress: (event) => {
+          if (onBytes(event) === 'abort-storage') {
+            try { task?.cancel(); } catch { /* the rejection is handled below */ }
+          }
+        },
+      });
+      const downloaded = await task.downloadAsync();
+      resultFile = downloaded && downloaded.exists ? downloaded : tmpFile;
+      if (!resultFile?.exists) {
+        throw makeError('ABORTED', 'Download cancelled.');
+      }
+      return { size: resultFile.size };
+    },
+    commitTemp: () => {
+      if (finalFile.exists) finalFile.delete();
+      if (resultFile.exists && resultFile.uri !== finalFile.uri) {
+        resultFile.moveSync(finalFile);
+      }
+    },
+    writeReceipt: (size) => {
+      receiptFile.write(String(size));
+    },
+  });
 
   if (!finalFile.exists || finalFile.size <= 0) {
     throw makeError('DOWNLOAD_FAILED', 'Could not save the downloaded lesson.');
   }
-
   return finalFile.uri;
 }
 
@@ -176,12 +200,14 @@ function notifyProgress(entry, ratio, meta) {
 
 export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
   const safe = sanitizeAudioFilename(filename);
+  purgeOrphanTempFiles();
 
   const cachedUri = getCachedAudioUri(safe);
   if (cachedUri) return cachedUri;
 
   const existing = inflight.get(safe);
   if (existing) {
+    const unlink = bindAbort({ abort: () => existing.abort?.() }, signal);
     if (onProgress) {
       existing.listeners.add(onProgress);
       if (existing.lastRatio != null || existing.lastMeta) {
@@ -191,6 +217,7 @@ export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
     try {
       return await existing.promise;
     } finally {
+      unlink();
       if (onProgress) existing.listeners.delete(onProgress);
     }
   }
@@ -199,19 +226,23 @@ export async function getLocalAudioUri(filename, { onProgress, signal } = {}) {
     throw makeError('ABORTED', 'Download cancelled.');
   }
 
+  const controller = new AbortController();
+  const unlink = bindAbort(controller, signal);
   const entry = {
     listeners: new Set(),
     lastRatio: null,
     lastMeta: undefined,
     promise: null,
+    abort: () => controller.abort(),
   };
   if (onProgress) entry.listeners.add(onProgress);
 
   entry.promise = downloadToCache(
     safe,
     (ratio, meta) => notifyProgress(entry, ratio, meta),
-    signal
+    controller.signal
   ).finally(() => {
+    unlink();
     inflight.delete(safe);
   });
   inflight.set(safe, entry);
@@ -237,4 +268,5 @@ export function deleteCachedAudio(filename) {
   const dir = getCacheDir();
   removeIfExists(new File(dir, safe));
   removeIfExists(new File(dir, `${safe}.tmp`));
+  removeIfExists(new File(dir, `${safe}.bytes`));
 }

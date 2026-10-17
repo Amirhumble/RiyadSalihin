@@ -1,5 +1,5 @@
 // Syncs content/audios.js into the audios table on every startup.
-// Idempotent. Never overwrites position_ms or duration_ms (user/runtime data).
+// Idempotent. Never overwrites position_ms, duration_ms, or completed (user/runtime data).
 
 function validateHadithRange(from, to, pos, fname) {
   if (!Number.isInteger(from) || from < 0) {

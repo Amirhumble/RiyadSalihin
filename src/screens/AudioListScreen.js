@@ -22,6 +22,7 @@ import spacing from '@/constants/spacing';
 import { useAudio } from '@/context/AudioContext';
 import { getAllAudios } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import { isLessonCompleted } from '@/services/lessonProgress';
 import { preparePdfAsset } from '@/services/pdfAsset';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 import { findLessonByHadithNumber, parseHadithNumber } from '@/utils/hadithSearch';
@@ -249,7 +250,7 @@ const AudioRow = memo(function AudioRow({ audio, onPress }) {
   const hasDuration = durationMs > 0;
   const hasPosition = positionMs > 500;
   const progress = hasDuration ? Math.min(positionMs / durationMs, 1) : 0;
-  const isCompleted = hasDuration && progress >= 0.98;
+  const isCompleted = isLessonCompleted(audio);
   const inProgress = hasPosition && !isCompleted;
 
   const rangeLabel = formatHadithRange(audio.hadith_number_from, audio.hadith_number_to);

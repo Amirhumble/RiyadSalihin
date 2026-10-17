@@ -27,6 +27,7 @@ import { useAudio, useAudioPlayer } from '@/context/AudioContext';
 import { clampPage, usePdfSession } from '@/context/PdfSessionContext';
 import { getAudioById } from '@/database/repositories/audioRepository';
 import { useDbQuery } from '@/hooks/useDbQuery';
+import { playbackUiState } from '@/services/playbackCommands';
 import { formatHadithRange } from '@/utils/formatHadithRange';
 
 const SPEED_OPTIONS = [
@@ -56,6 +57,13 @@ function audioErrorMessage(err) {
     return err.message || 'Could not download this lesson. Please try again.';
   }
   return err.message || 'Audio is currently unavailable.';
+}
+
+function downloadErrorMessage(err) {
+  if (err?.code === 'STORAGE_FULL') {
+    return 'Not enough free storage to save this lesson. You can keep listening online.';
+  }
+  return 'Could not save this lesson for offline listening. You can keep listening online.';
 }
 
 export default function ReaderScreen() {
@@ -233,16 +241,19 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
     currentAudio, audioError, clearAudioError,
     isPlaying, audioLoading,
     currentTime, duration, didJustFinish,
-    playbackRate, downloadProgress,
-    loadAudio, play, pause, seek, setSpeed,
+    playbackRate, downloadProgress, downloadError,
+    loadAudio, play, pause, seek, setSpeed, retryOfflineSave,
   } = useAudioPlayer();
 
   const isThis = currentAudio?.id === audio?.id;
-  const playing = isThis && isPlaying && !didJustFinish;
+  const transport = playbackUiState({
+    isPlaying: isThis && isPlaying,
+    didJustFinish: isThis && didJustFinish,
+    audioLoading: isThis && audioLoading,
+  });
+  const playing = transport.playing;
+  const showPlaySpinner = transport.showSpinner;
   const isDownloading = isThis && downloadProgress != null && downloadProgress < 1;
-  // Spinner only while the source is still starting — never for a cache check
-  // or expo-audio isBuffering on a local file (that flash is what made play feel slow).
-  const showPlaySpinner = isThis && audioLoading && !playing;
   const time = isThis ? currentTime : 0;
   const dur = isThis && duration > 0 ? duration : 0;
   const downloadPct = Math.round(Math.min(Math.max(downloadProgress ?? 0, 0), 1) * 100);
@@ -395,14 +406,25 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
 
   const handlePlayPause = useCallback(() => {
     clearAudioError();
-    if (!isThis || audioError) {
+    if (!isThis || (audioError && !playing && !audioLoading)) {
       loadAudio(audio, audio.position_ms ?? 0);
       return;
     }
-    if (audioLoading) return;
-    if (playing) pause();
+    // A tap during the start spinner pauses. Ignoring it left the control stuck.
+    if (transport.pauseOnPress) pause();
     else play();
-  }, [isThis, playing, audio, audioError, audioLoading, loadAudio, play, pause, clearAudioError]);
+  }, [
+    isThis,
+    playing,
+    audio,
+    audioError,
+    audioLoading,
+    transport.pauseOnPress,
+    loadAudio,
+    play,
+    pause,
+    clearAudioError,
+  ]);
 
   const handleRetryDownload = useCallback(() => {
     clearAudioError();
@@ -469,7 +491,7 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
         </TouchableOpacity>
       </View>
 
-      {isThis && isDownloading ? (
+      {isThis && isDownloading && !showPlaySpinner ? (
         <View style={pl.downloadRow}>
           <Text style={pl.downloadText}>
             {playing ? `Saving for offline ${downloadPct}%` : `Downloading ${downloadPct}%`}
@@ -477,6 +499,21 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           <View style={pl.downloadTrack}>
             <View style={[pl.downloadFill, { width: `${downloadPct}%` }]} />
           </View>
+        </View>
+      ) : null}
+
+      {isThis && downloadError && !audioError && !isDownloading ? (
+        <View style={pl.errorRow}>
+          <Text style={pl.errorText}>{downloadErrorMessage(downloadError)}</Text>
+          <TouchableOpacity
+            onPress={retryOfflineSave}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Try saving this lesson again"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={pl.retryText}>Try saving again</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 
@@ -539,7 +576,7 @@ const PlayerBar = memo(function PlayerBar({ audio }) {
           style={[pl.playBtn, playing && pl.playBtnActive]}
           onPress={handlePlayPause}
           activeOpacity={0.85}
-          accessibilityLabel={playing ? 'Pause audio' : 'Play audio'}
+          accessibilityLabel={transport.pauseOnPress ? 'Pause audio' : 'Play audio'}
           accessibilityRole="button"
           accessibilityState={{ busy: showPlaySpinner, checked: playing }}
         >

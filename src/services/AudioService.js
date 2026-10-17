@@ -7,7 +7,8 @@ let _player = null;
 
 export function getPlayer() {
   if (!_player) {
-    _player = createAudioPlayer(null);
+    // downloadFirst stays off so replace() streams. The cache is a separate save.
+    _player = createAudioPlayer(null, { downloadFirst: false });
   }
   return _player;
 }

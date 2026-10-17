@@ -3,14 +3,10 @@
     "name": "RiyadusSalihin",
     "slug": "riyadusalihin",
     "version": "1.0.0",
-     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "riyadussalihinapp",
     "userInterfaceStyle": "automatic",
-    "ios": {
-      "icon": "./assets/images/icon.png"
-    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#1A4E1D",
@@ -42,7 +38,9 @@
       ],
       "expo-asset",
       "expo-sqlite",
-      "expo-audio"
+      "expo-audio",
+      "expo-image",
+      "expo-web-browser"
     ],
     "extra": {
       "router": {},
