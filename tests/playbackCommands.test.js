@@ -88,6 +88,22 @@ test('seeks run one at a time and still complete after a transport change', asyn
   assert.deepEqual(calls, ['seek:12', 'seek:40']);
 });
 
+test('a failed resume seek still starts playback', async () => {
+  const calls = [];
+  const gate = createPlaybackGate({
+    play() { calls.push('play'); },
+    pause() { calls.push('pause'); },
+    seekTo() {
+      throw new Error('timeline not ready');
+    },
+  });
+
+  const result = await gate.requestPlay({ restartAt: 90 });
+  assert.equal(result.applied, true);
+  assert.deepEqual(calls, ['play']);
+  assert.equal(gate.getDesired(), 'play');
+});
+
 test('a failed play rejects and a later pause still runs', async () => {
   const calls = [];
   const gate = createPlaybackGate({

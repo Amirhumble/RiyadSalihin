@@ -31,6 +31,15 @@ import {
 } from '@/services/lessonProgress';
 import { createPlaybackGate } from '@/services/playbackCommands';
 import {
+  RESUME_APPLY_THRESHOLD_MS,
+  freshResume,
+  isResumePending,
+  planResumeStart,
+  positionToSave,
+  reduceResumeReady,
+  resumeTargetSeconds,
+} from '@/services/resumePosition';
+import {
   configureAudioSession,
   getPlayer,
   loadSource,
@@ -69,6 +78,8 @@ export function AudioProvider({ children }) {
   const loadedFilenameRef = useRef(null);
   const loadGen = useRef(0);
   const pendingStartRef = useRef(null);
+  const acceptedPositionRef = useRef(null);
+  const intentionalZeroRef = useRef(null);
   const streamFailedRef = useRef(false);
   const finishedForRef = useRef(null);
   const completedWriteRef = useRef(new Set());
@@ -124,18 +135,50 @@ export function AudioProvider({ children }) {
       didJustFinish: ended,
       playbackState: ended ? 'ended' : player?.playbackState,
     });
-    const posMs = ended ? 0 : Math.max(0, Math.round(time * 1000));
-    // Don't wipe a saved resume point when the player has not started.
-    if (!ended && !mark && posMs === 0 && !progressGateRef.current.accept) return;
+
+    if (ended) {
+      intentionalZeroRef.current = audio.id;
+      acceptedPositionRef.current = { id: audio.id, ms: 0 };
+      pendingStartRef.current = null;
+      completedWriteRef.current.add(audio.id);
+      markAudioCompleted(audio.id, 0).catch(() => {
+        completedWriteRef.current.delete(audio.id);
+      });
+      return;
+    }
+
+    const pending = pendingStartRef.current;
+    const resumePending = isResumePending(pending, loadGen.current);
+    const accepted = acceptedPositionRef.current;
+    const rawMs = Math.max(0, Math.round(time * 1000));
+    const posMs = positionToSave({
+      playerMs: rawMs,
+      acceptedMs: accepted?.id === audio.id ? accepted.ms : 0,
+      resumeTargetMs: resumePending ? pending.startPositionMs : 0,
+      resumePending,
+      intentionalZero: intentionalZeroRef.current === audio.id,
+    });
 
     if (mark) {
+      if (posMs == null) return;
       completedWriteRef.current.add(audio.id);
+      if (posMs >= RESUME_APPLY_THRESHOLD_MS) {
+        acceptedPositionRef.current = { id: audio.id, ms: posMs };
+      }
       markAudioCompleted(audio.id, posMs).catch(() => {
         completedWriteRef.current.delete(audio.id);
       });
       return;
     }
+
+    // A 0 from replace(), or before the new source has played, is not a resume point.
+    if (posMs == null) return;
+    if (posMs === 0 && intentionalZeroRef.current !== audio.id && !progressGateRef.current.accept) return;
+
     lastPersist.current = Date.now();
+    if (posMs >= RESUME_APPLY_THRESHOLD_MS) {
+      acceptedPositionRef.current = { id: audio.id, ms: posMs };
+    }
     savePlaybackPosition(audio.id, posMs).catch(() => {});
   }, []);
 
@@ -169,6 +212,9 @@ export function AudioProvider({ children }) {
     if (endedNow) {
       if (!mark || finishedForRef.current === audio.id) return;
       finishedForRef.current = audio.id;
+      intentionalZeroRef.current = audio.id;
+      acceptedPositionRef.current = { id: audio.id, ms: 0 };
+      pendingStartRef.current = null;
       completedWriteRef.current.add(audio.id);
       markAudioCompleted(audio.id, 0).catch(() => {
         finishedForRef.current = null;
@@ -179,7 +225,22 @@ export function AudioProvider({ children }) {
 
     if (!status.playing) return;
 
-    const posMs = Math.max(0, Math.round(time * 1000));
+    const rawMs = Math.max(0, Math.round(time * 1000));
+    const pending = pendingStartRef.current;
+    const resumePending = isResumePending(pending, loadGen.current);
+    const accepted = acceptedPositionRef.current;
+    const posMs = positionToSave({
+      playerMs: rawMs,
+      acceptedMs: accepted?.id === audio.id ? accepted.ms : 0,
+      resumeTargetMs: resumePending ? pending.startPositionMs : 0,
+      resumePending,
+      intentionalZero: intentionalZeroRef.current === audio.id,
+    });
+    if (!resumePending && rawMs >= RESUME_APPLY_THRESHOLD_MS) {
+      acceptedPositionRef.current = { id: audio.id, ms: rawMs };
+    }
+    if (posMs == null) return;
+
     const now = Date.now();
     const due = now - lastPersist.current >= PERSIST_INTERVAL_MS;
 
@@ -194,6 +255,9 @@ export function AudioProvider({ children }) {
 
     if (!due) return;
     lastPersist.current = now;
+    if (posMs >= RESUME_APPLY_THRESHOLD_MS) {
+      acceptedPositionRef.current = { id: audio.id, ms: posMs };
+    }
     savePlaybackPosition(audio.id, posMs).catch(() => {});
   }, [
     status.playing,
@@ -232,23 +296,37 @@ export function AudioProvider({ children }) {
     }
   }, [audioLoading, status.isLoaded, status.playing]);
 
-  // Seek to a saved position only after this source is ready, and only if
-  // the user has not paused since the load started.
+  // replace() leaves ExoPlayer at 0. If that first seek was ignored because the
+  // timeline was not ready, seek again once this source's clock is actually ready.
+  // A pause keeps the pending position so the next play can still restore it.
   useEffect(() => {
     const pending = pendingStartRef.current;
-    if (!pending) return;
-    if (pending.gen !== loadGen.current) return;
-    if (!status.isLoaded) return;
-    if (gateRef.current.getDesired() === 'pause') {
-      pendingStartRef.current = null;
+    if (!isResumePending(pending, loadGen.current)) return;
+
+    const reduced = reduceResumeReady(pending, status);
+    pendingStartRef.current = reduced.pending;
+
+    if (reduced.landed) {
+      const audio = currentAudioRef.current;
+      const ms = reduced.positionMs || pending.startPositionMs;
+      if (audio?.id && ms >= RESUME_APPLY_THRESHOLD_MS) {
+        acceptedPositionRef.current = { id: audio.id, ms };
+      }
+      lastPersist.current = Date.now();
       return;
     }
 
-    pendingStartRef.current = null;
-    const resumeAt = Math.max(0, (pending.startPositionMs || 0) / 1_000);
-    if (resumeAt <= 0) return;
-    gateRef.current.requestSeek(resumeAt).catch(() => {});
-  }, [status.isLoaded]);
+    if (!reduced.issueSeek) return;
+    const seconds = resumeTargetSeconds(reduced.pending?.startPositionMs ?? pending.startPositionMs);
+    if (!(seconds > 0)) return;
+    gateRef.current.requestSeek(seconds).catch(() => {});
+  }, [
+    status.isLoaded,
+    status.currentTime,
+    status.playbackState,
+    status.didJustFinish,
+    status.isBuffering,
+  ]);
 
   // If a remote stream never becomes ready, surface a retryable playback error.
   // A background save failure is not a playback failure.
@@ -267,7 +345,6 @@ export function AudioProvider({ children }) {
         return;
       }
       streamFailedRef.current = true;
-      pendingStartRef.current = null;
       setAudioLoading(false);
       setAudioError(playbackError(
         'PLAYBACK_FAILED',
@@ -279,6 +356,8 @@ export function AudioProvider({ children }) {
 
   // Apply a missed play or pause once the player is ready to accept it.
   useEffect(() => {
+    // A bare play here would start the new item at 0 and race the resume seek.
+    if (isResumePending(pendingStartRef.current, loadGen.current)) return;
     gateRef.current.reconcile({
       playing: status.playing,
       isLoaded: status.isLoaded,
@@ -315,7 +394,7 @@ export function AudioProvider({ children }) {
     else if (!error) setDownloadError(null);
 
     if (outcome.playbackError) {
-      pendingStartRef.current = null;
+      // Keep a pending resume so a failed start cannot store position 0.
       if (!player?.playing && !player?.isLoaded) loadedFilenameRef.current = null;
       setAudioLoading(false);
       setAudioError((current) => current || outcome.playbackError);
@@ -325,14 +404,32 @@ export function AudioProvider({ children }) {
     if (!outcome.useDownloadedFile || !localUri) return;
     if (gateRef.current.getDesired() === 'pause') return;
     try {
+      const liveMs = Math.max(0, Math.round((player?.currentTime ?? 0) * 1000));
+      const accepted = acceptedPositionRef.current;
+      const acceptedMs = accepted?.id === audioRecord.id ? accepted.ms : 0;
+      const resumeMs = liveMs >= RESUME_APPLY_THRESHOLD_MS
+        ? liveMs
+        : (acceptedMs >= RESUME_APPLY_THRESHOLD_MS ? acceptedMs : startPositionMs);
+      if (resumeMs >= RESUME_APPLY_THRESHOLD_MS) {
+        pendingStartRef.current = {
+          ...freshResume(resumeMs, {
+            currentTime: player?.currentTime ?? 0,
+            isLoaded: Boolean(player?.isLoaded),
+          }),
+          gen,
+          seekIssued: true,
+        };
+      } else {
+        pendingStartRef.current = null;
+      }
       loadSource({ uri: localUri });
       loadedFilenameRef.current = audioRecord.filename;
       try { svcSetRate(playbackRateRef.current); } catch (_) { /* ignore */ }
       streamFailedRef.current = false;
-      if (startPositionMs > 0) {
-        pendingStartRef.current = { gen, startPositionMs };
-      }
-      gateRef.current.requestPlay().catch(() => {});
+      const options = resumeMs >= RESUME_APPLY_THRESHOLD_MS
+        ? { restartAt: resumeMs / 1000 }
+        : {};
+      gateRef.current.requestPlay(options).catch(() => {});
       setAudioLoading(false);
       setAudioError(null);
     } catch (err) {
@@ -345,10 +442,28 @@ export function AudioProvider({ children }) {
   const play = useCallback(() => {
     setAudioError(null);
     finishedForRef.current = null;
+    const pending = pendingStartRef.current;
+    const resumeAt = isResumePending(pending, loadGen.current)
+      ? resumeTargetSeconds(pending.startPositionMs)
+      : 0;
+    if (resumeAt > 0) {
+      pending.seekIssued = true;
+      gateRef.current.requestPlay({ restartAt: resumeAt }).catch((err) => {
+        setAudioLoading(false);
+        setAudioError(err);
+      });
+      return;
+    }
+
     const player = playerRef.current;
     const dur = player?.duration ?? 0;
     const time = player?.currentTime ?? 0;
     const restart = dur > 0 && time >= Math.max(0, dur - 0.35);
+    if (restart && currentAudioRef.current?.id) {
+      intentionalZeroRef.current = currentAudioRef.current.id;
+      acceptedPositionRef.current = { id: currentAudioRef.current.id, ms: 0 };
+      pendingStartRef.current = null;
+    }
     gateRef.current.requestPlay(restart ? { restartAt: 0 } : {}).catch((err) => {
       setAudioLoading(false);
       setAudioError(err);
@@ -373,14 +488,24 @@ export function AudioProvider({ children }) {
     const gen = ++loadGen.current;
     setAudioError(null);
 
-    // Already in the player — play/pause must not replace the source or flash loading.
-    if (loadedFilenameRef.current === audioRecord.filename) {
+    const playerNow = playerRef.current;
+    const playerMs = Math.max(0, Math.round((playerNow?.currentTime ?? 0) * 1000));
+    const sameSource = loadedFilenameRef.current === audioRecord.filename;
+    const plan = planResumeStart({
+      savedPositionMs: startPositionMs,
+      playerMs,
+      sameSource,
+    });
+
+    // Same file, still at a real position. Do not replace() — that restarts ExoPlayer at 0.
+    if (sameSource && plan.action === 'continue') {
       pendingStartRef.current = null;
       setAudioLoading(false);
       setDownloadProgress(null);
       if (currentAudioRef.current?.id !== audioRecord.id) {
         setCurrentAudio(audioRecord);
       }
+      currentAudioRef.current = audioRecord;
       play();
       return;
     }
@@ -394,16 +519,54 @@ export function AudioProvider({ children }) {
       completedWriteRef.current.add(audioRecord.id);
     }
     finishedForRef.current = null;
+    intentionalZeroRef.current = null;
     currentAudioRef.current = audioRecord;
     setCurrentAudio(audioRecord);
     durationSavedFor.current = null;
     lastPersist.current = 0;
     streamFailedRef.current = false;
+
+    if (plan.action === 'restore') {
+      pendingStartRef.current = {
+        ...freshResume(plan.positionMs, {
+          currentTime: playerNow?.currentTime ?? 0,
+          isLoaded: Boolean(playerNow?.isLoaded),
+        }, { sourceMatches: sameSource }),
+        gen,
+      };
+    } else {
+      pendingStartRef.current = null;
+    }
     armProgressGate();
+
+    const resumeSeconds = plan.action === 'restore' ? plan.positionMs / 1000 : 0;
+    const startPlayback = () => {
+      if (resumeSeconds > 0 && pendingStartRef.current?.gen === gen) {
+        pendingStartRef.current.seekIssued = true;
+      }
+      const options = resumeSeconds > 0 ? { restartAt: resumeSeconds } : {};
+      gateRef.current.requestPlay(options).catch((err) => {
+        if (gen !== loadGen.current) return;
+        setAudioLoading(false);
+        setAudioError(err);
+      });
+    };
+
+    // Player was reset on this file. Seek, then play. Do not replace the source.
+    if (sameSource) {
+      setAudioLoading(false);
+      setDownloadProgress(null);
+      setDownloadError(null);
+      try {
+        startPlayback();
+      } finally {
+        suspendProgressRef.current = false;
+      }
+      return;
+    }
 
     const cachedUri = getCachedAudioUri(audioRecord.filename);
     if (cachedUri) {
-      pendingStartRef.current = startPositionMs > 0 ? { gen, startPositionMs } : null;
       setAudioLoading(false);
       setDownloadProgress(null);
       setDownloadError(null);
@@ -411,10 +574,7 @@ export function AudioProvider({ children }) {
         loadSource({ uri: cachedUri });
         loadedFilenameRef.current = audioRecord.filename;
         try { svcSetRate(playbackRateRef.current); } catch (_) { /* ignore */ }
-        gateRef.current.requestPlay().catch((err) => {
-          if (gen !== loadGen.current) return;
-          setAudioError(err);
-        });
+        startPlayback();
       } catch (err) {
         if (gen !== loadGen.current) return;
         loadedFilenameRef.current = null;
@@ -428,10 +588,10 @@ export function AudioProvider({ children }) {
 
     // Cache miss: stream the remote MP3 immediately. Saving a local copy
     // reports its own progress and must not hold the play button.
+    // The resume seek is inside the same play command, after replace().
     setAudioLoading(true);
     setDownloadError(null);
     setDownloadProgress(isAudioDownloadInflight(audioRecord.filename) ? null : 0);
-    pendingStartRef.current = startPositionMs > 0 ? { gen, startPositionMs } : null;
 
     try {
       const remoteUrl = getRemoteAudioUrl(audioRecord.filename);
@@ -441,15 +601,10 @@ export function AudioProvider({ children }) {
       });
       loadedFilenameRef.current = audioRecord.filename;
       try { svcSetRate(playbackRateRef.current); } catch (_) { /* ignore */ }
-      gateRef.current.requestPlay().catch((err) => {
-        if (gen !== loadGen.current) return;
-        setAudioLoading(false);
-        setAudioError(err);
-      });
+      startPlayback();
     } catch (err) {
       if (gen !== loadGen.current) return;
       streamFailedRef.current = true;
-      pendingStartRef.current = null;
       loadedFilenameRef.current = null;
       console.error('[AudioContext] loadAudio stream failed:', err);
       setAudioError(err);
@@ -478,6 +633,13 @@ export function AudioProvider({ children }) {
     const clamped = dur > 0 ? Math.min(safe, dur) : safe;
     // Scrubbing after the ending is a new resume point. Completion stays set.
     finishedForRef.current = null;
+    pendingStartRef.current = null;
+    const audio = currentAudioRef.current;
+    const ms = Math.round(clamped * 1000);
+    if (audio?.id) {
+      intentionalZeroRef.current = ms < RESUME_APPLY_THRESHOLD_MS ? audio.id : null;
+      acceptedPositionRef.current = { id: audio.id, ms };
+    }
     return gateRef.current.requestSeek(clamped).then(() => {
       persistAudio(currentAudioRef.current);
     }).catch((err) => {
@@ -487,9 +649,13 @@ export function AudioProvider({ children }) {
 
   const stop = useCallback(() => {
     setAudioLoading(false);
+    pendingStartRef.current = null;
     return gateRef.current.requestPause().then(() => gateRef.current.requestSeek(0)).then(() => {
       const audio = currentAudioRef.current;
-      if (audio) savePlaybackPosition(audio.id, 0).catch(() => {});
+      if (!audio?.id) return;
+      intentionalZeroRef.current = audio.id;
+      acceptedPositionRef.current = { id: audio.id, ms: 0 };
+      savePlaybackPosition(audio.id, 0).catch(() => {});
     }).catch((err) => {
       console.warn('[AudioContext] stop failed:', err);
     });

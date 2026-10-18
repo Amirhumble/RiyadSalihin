@@ -47,7 +47,13 @@ export function createPlaybackGate({ play, pause, seekTo }) {
     return enqueue(async () => {
       if (mine !== ticket || desired !== 'play') return { applied: false, action: 'play' };
       if (restartAt != null) {
-        await seekTo(restartAt);
+        try {
+          await seekTo(restartAt);
+        } catch (err) {
+          // The item may not be seekable until ExoPlayer has prepared it.
+          // Starting playback still has to happen; a later status can seek again.
+          if (mine !== ticket || desired !== 'play') return { applied: false, action: 'play' };
+        }
         if (mine !== ticket || desired !== 'play') return { applied: false, action: 'play' };
       }
       play();
